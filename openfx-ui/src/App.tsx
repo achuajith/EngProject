@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
+import { fetchPortfolio, downloadPortfolioCSV, login, register, type PortfolioResponse } from "@/lib/api";
 import {
   LineChart,
   Line,
@@ -65,6 +66,8 @@ const watchlistDefault = ["MSFT", "AMZN", "META", "GOOGL", "TSLA", "QQQ", "SPY"]
 function format(n, currency = "USD") {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n);
 }
+
+// Note: password hashing is done server-side. Do NOT pre-hash in the client for this demo.
 
 const COLORS = ["#06b6d4", "#3b82f6", "#10b981", "#f59e0b", "#ef4444"];
 
@@ -134,16 +137,16 @@ function TopNav({ route, setRoute, role, setRole, isAuthed, onLogout, onLogin, d
 }
 
 // —— Auth Screens ——
-function LoginScreen({ onSuccess, onForgot, goRegister }) {
-  const [email, setEmail] = useState("");
+function LoginScreen({ onSuccess, onForgot, goRegister, loading, serverError }: { onSuccess: (u:string,p:string)=>void; onForgot: ()=>void; goRegister: ()=>void; loading?: boolean; serverError?: string | null }) {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [err, setErr] = useState(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  function tryLogin() {
-    if (!email || !password) return setErr("Email and password required");
-    // demo success
+  async function tryLogin() {
+    if (!username || !password) return setErr("Username and password required");
     setErr(null);
-    onSuccess();
+    // Pass plaintext password to server (server will hash)
+    onSuccess(username.trim(), password);
   }
 
   return (
@@ -154,17 +157,18 @@ function LoginScreen({ onSuccess, onForgot, goRegister }) {
           <CardDescription>Sign in to view your portfolio and alerts.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          {err && <div className="text-sm text-rose-600">{err}</div>}
+    {err && <div className="text-sm text-rose-600">{err}</div>}
+    {serverError && <div className="text-sm text-rose-600">{serverError}</div>}
           <div className="grid gap-2">
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required />
+            <Label htmlFor="username">Username</Label>
+            <Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="your username" required />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="password">Password</Label>
             <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
           </div>
           <div className="flex items-center justify-between">
-            <Button className="w-full" onClick={tryLogin}><LogIn className="h-4 w-4 mr-1" />Login</Button>
+            <Button className="w-full" onClick={tryLogin} disabled={!!loading}><LogIn className="h-4 w-4 mr-1" />{loading ? 'Logging in…' : 'Login'}</Button>
           </div>
           <div className="flex justify-between text-sm">
             <Button variant="link" className="px-0" onClick={onForgot}>Forgot password?</Button>
@@ -178,6 +182,27 @@ function LoginScreen({ onSuccess, onForgot, goRegister }) {
 
 function RegisterScreen({ goLogin }) {
   const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (!username || !email || !password || !name) return setErr('All fields required');
+    setErr(null);
+    setLoading(true);
+    try {
+      await register(username.trim(), email.trim(), name.trim(), password);
+      // After successful register, redirect to login screen
+      goLogin();
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="max-w-md mx-auto pt-8">
       <Card className="shadow-xl rounded-2xl">
@@ -186,23 +211,28 @@ function RegisterScreen({ goLogin }) {
           <CardDescription>Start tracking and learning today.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          {err && <div className="text-sm text-rose-600">{err}</div>}
           <div className="grid gap-2">
             <Label htmlFor="fullName">Full name</Label>
             <Input id="fullName" value={name} onChange={(e) => setName(e.target.value)} placeholder="Jane Doe" />
           </div>
           <div className="grid gap-2">
+            <Label htmlFor="username">Username</Label>
+            <Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="your username" />
+          </div>
+          <div className="grid gap-2">
             <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" placeholder="you@example.com" />
+            <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="password">Password</Label>
-            <Input id="password" type="password" placeholder="Minimum 8 characters" />
+            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Minimum 8 characters" />
           </div>
           <div className="flex items-center gap-2">
             <Switch id="tos" />
             <Label htmlFor="tos" className="text-sm">I agree to the Terms</Label>
           </div>
-          <Button onClick={goLogin}><UserPlus className="h-4 w-4 mr-1" />Register</Button>
+          <Button onClick={submit} disabled={loading}><UserPlus className="h-4 w-4 mr-1" />{loading ? 'Registering…' : 'Register'}</Button>
           <Button variant="link" className="px-0" onClick={goLogin}>Have an account? Login</Button>
         </CardContent>
       </Card>
@@ -232,7 +262,7 @@ function ForgotPasswordScreen({ goLogin }) {
 }
 
 // —— Portfolio Page ——
-function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist, setWatchlist }) {
+function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist, setWatchlist, onLoadFromApi, onDownloadApi, loading, error }: { holdings:any; setHoldings:any; currency:any; setCurrency:any; watchlist:any; setWatchlist:any; onLoadFromApi: ()=>void; onDownloadApi: ()=>void; loading?: boolean; error?: string | null }) {
   const totals = useMemo(() => {
     const mv = holdings.reduce((s, h) => s + h.qty * h.last, 0);
     const cost = holdings.reduce((s, h) => s + h.qty * h.avg, 0);
@@ -302,9 +332,13 @@ function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist
           <div className="flex gap-2 items-center">
             <Input placeholder="Filter symbol…" className="w-[200px]" />
             <Button variant="outline" onClick={exportCSV}><Activity className="h-4 w-4 mr-1" />Export CSV</Button>
+            <Button variant="outline" onClick={onLoadFromApi}><Activity className="h-4 w-4 mr-1" />Load from API</Button>
+            <Button variant="outline" onClick={onDownloadApi}><Activity className="h-4 w-4 mr-1" />Download API CSV</Button>
           </div>
         </CardHeader>
         <CardContent>
+          {loading && <div className="mb-3 text-sm text-muted-foreground">Loading portfolio…</div>}
+          {error && <div className="mb-3 text-sm text-rose-600">{error}</div>}
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
@@ -652,18 +686,98 @@ export default function App() {
   const [holdings, setHoldings] = useState(defaultHoldings);
   const [watchlist, setWatchlist] = useState(watchlistDefault);
   const [dark, setDark] = useState(false);
+  const [apiPortfolio, setApiPortfolio] = useState<PortfolioResponse | null>(null);
+  const [authUsername, setAuthUsername] = useState<string | null>(null);
+  const [authPassword, setAuthPassword] = useState<string | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
+  const [portfolioError, setPortfolioError] = useState<string | null>(null);
 
-  const onLoginSuccess = () => {
-    setAuthed(true);
-    setRoute("portfolio");
+  // On mount, restore session from localStorage if present
+  useEffect(() => {
+    const token = localStorage.getItem('authToken')
+    const username = localStorage.getItem('authUsername')
+    if (token) {
+      setAuthToken(token)
+      setAuthed(true)
+      setRoute('portfolio')
+      // load portfolio using token
+      void loadPortfolioFromApi(undefined, undefined)
+    } else if (username) {
+      // username can be remembered, but password must be re-entered for security
+      setAuthUsername(username)
+    }
+  }, [])
+
+  const onLoginSuccess = async (username: string, password: string) => {
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      // Try token-based login first
+      const resp = await login(username, password).catch((e) => { throw e })
+      // resp may contain a token field; otherwise backend might just return user info
+      const token = resp?.token || resp?.accessToken || null
+      if (token) {
+        setAuthToken(token)
+        localStorage.setItem('authToken', token)
+      } else {
+        // fallback: store creds (note: storing hashes in localStorage has security implications)
+        setAuthUsername(username)
+        setAuthPassword(password)
+        localStorage.setItem('authUsername', username)
+      }
+
+      setAuthed(true)
+      setRoute('portfolio')
+      // load portfolio using token if available
+      await loadPortfolioFromApi(undefined, undefined)
+    } catch (e: any) {
+      const msg = e?.message || String(e)
+      setAuthError(msg)
+      setAuthed(false)
+    } finally {
+      setAuthLoading(false)
+    }
   };
   const onLogout = () => {
     setAuthed(false);
     setRoute("login");
+    setAuthToken(null);
+    setAuthUsername(null);
+    setAuthPassword(null);
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('authUsername');
   };
   const onLogin = () => setRoute("login");
 
   const showAdmin = role === "admin";
+
+  async function loadPortfolioFromApi(usernameArg?: string | null, passwordArg?: string | null) {
+    const username = usernameArg ?? authUsername;
+    const password = passwordArg ?? authPassword;
+    const token = authToken ?? undefined;
+    if (!token && (!username || !password)) return setPortfolioError('Missing credentials: please login first');
+    setPortfolioError(null)
+    setPortfolioLoading(true)
+    try {
+      const p = await fetchPortfolio(username ?? '', password ?? '', token)
+      setApiPortfolio(p)
+      // Map API holdings -> UI holdings shape
+      const mapped = p.holdings.map((h) => ({ symbol: h.symbol, qty: h.quantity, avg: h.buyPrice, last: h.currentPrice }))
+      setHoldings(mapped)
+    } catch (e: any) {
+      setPortfolioError(e?.message || String(e))
+    } finally {
+      setPortfolioLoading(false)
+    }
+  }
+
+  function downloadApiCSV() {
+    if (!apiPortfolio) return window.alert("No API portfolio loaded. Load first using 'Load from API'.");
+    downloadPortfolioCSV(apiPortfolio);
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
@@ -671,7 +785,7 @@ export default function App() {
 
       {!isAuthed && (route === "login" || route === "register" || route === "forgot") && (
         <main className="py-8">
-          {route === "login" && <LoginScreen onSuccess={onLoginSuccess} onForgot={() => setRoute("forgot")} goRegister={() => setRoute("register")} />}
+          {route === "login" && <LoginScreen onSuccess={onLoginSuccess} onForgot={() => setRoute("forgot")} goRegister={() => setRoute("register")} loading={authLoading} serverError={authError} />}
           {route === "register" && <RegisterScreen goLogin={() => setRoute("login")} />}
           {route === "forgot" && <ForgotPasswordScreen goLogin={() => setRoute("login")} />}
         </main>
@@ -686,7 +800,7 @@ export default function App() {
               <TabsTrigger value="preferences"><Settings className="h-4 w-4 mr-1" />Preferences</TabsTrigger>
               {showAdmin && (<TabsTrigger value="admin"><Shield className="h-4 w-4 mr-1" />Admin</TabsTrigger>)}
             </TabsList>
-            <TabsContent value="portfolio"><PortfolioPage holdings={holdings} setHoldings={setHoldings} currency={currency} setCurrency={setCurrency} watchlist={watchlist} setWatchlist={setWatchlist} /></TabsContent>
+            <TabsContent value="portfolio"><PortfolioPage holdings={holdings} setHoldings={setHoldings} currency={currency} setCurrency={setCurrency} watchlist={watchlist} setWatchlist={setWatchlist} onLoadFromApi={loadPortfolioFromApi} onDownloadApi={downloadApiCSV} loading={portfolioLoading} error={portfolioError} /></TabsContent>
             <TabsContent value="trade"><TradePage /></TabsContent>
             <TabsContent value="preferences"><PreferencesPage currency={currency} setCurrency={setCurrency} /></TabsContent>
             {showAdmin && (<TabsContent value="admin"><AdminDashboard /></TabsContent>)}

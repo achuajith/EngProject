@@ -7,10 +7,11 @@ import morgan from 'morgan'
 import cors from 'cors'
 import Joi from 'joi'
 import fetch from 'node-fetch'
+import bcrypt from 'bcryptjs'
 
 const app = express()
 
-const PORT = process.env.PORT || 4000
+const PORT = process.env.PORT
 const MONGO_URI = process.env.MONGO_URI
 const CORS_ORIGIN = process.env.CORS_ORIGIN
 
@@ -43,7 +44,10 @@ const User = mongoose.model('User', userSchema)
 const Portfolio = mongoose.model('Portfolio', portfolioSchema)
 
 // ===== App middleware =====
-app.use(cors({ origin: CORS_ORIGIN, credentials: true }))
+// If CORS_ORIGIN is provided in env, restrict to it. Otherwise allow any origin (useful for local dev).
+const corsOptions = CORS_ORIGIN ? { origin: CORS_ORIGIN, credentials: true } : { origin: true, credentials: true }
+app.use(cors(corsOptions))
+console.log('CORS configured:', CORS_ORIGIN ? CORS_ORIGIN : 'allow all')
 app.use(express.json())
 app.use(morgan('dev'))
 
@@ -71,15 +75,32 @@ async function fetchQuote(symbol) {
 }
 
 function credentialsSchema() {
-  return Joi.object({ username: Joi.string().required(), passwordHash: Joi.string().required() })
+  // Expect plaintext password from client; server will hash/verify it
+  return Joi.object({ username: Joi.string().required(), password: Joi.string().min(8).max(200).required() })
+}
+
+const SALT_ROUNDS = Number(process.env.BCRYPT_SALT_ROUNDS) || 10
+
+function hashPassword(password) {
+  return new Promise((resolve, reject) => {
+    bcrypt.hash(password, SALT_ROUNDS, (err, hash) => (err ? reject(err) : resolve(hash)))
+  })
+}
+
+function comparePassword(password, hash) {
+  return new Promise((resolve, reject) => {
+    bcrypt.compare(password, hash, (err, ok) => (err ? reject(err) : resolve(ok)))
+  })
 }
 
 async function verifyUserBody(req, res, next) {
   const username = (req.body?.username || req.header('x-username') || '').trim()
-  const passwordHash = (req.body?.passwordHash || req.header('x-passwordhash') || '').trim()
-  if (!username || !passwordHash) return res.status(401).json({ error: 'missing credentials', required: ['username', 'passwordHash'] })
-  const user = await User.findOne({ username, passwordHash })
+  const password = (req.body?.password || req.header('x-password') || '').trim()
+  if (!username || !password) return res.status(401).json({ error: 'missing credentials', required: ['username', 'password'] })
+  const user = await User.findOne({ username })
   if (!user) return res.status(401).json({ error: 'invalid credentials' })
+  const ok = await comparePassword(password, user.passwordHash).catch(() => false)
+  if (!ok) return res.status(401).json({ error: 'invalid credentials' })
   req.user = user
   next()
 }
@@ -87,7 +108,7 @@ async function verifyUserBody(req, res, next) {
 // ===== Users =====
 const registerSchema = Joi.object({
   email: Joi.string().email().required(),
-  passwordHash: Joi.string().min(8).max(200).required(),
+  password: Joi.string().min(8).max(200).required(),
   fullname: Joi.string().min(2).max(100).required(),
   username: Joi.string().alphanum().min(3).max(30).required()
 })
@@ -99,7 +120,16 @@ app.post('/users/register', async (req, res) => {
   const exists = await User.findOne({ $or: [{ email: value.email }, { username: value.username }] })
   if (exists) return res.status(409).json({ error: 'email or username exists' })
 
-  const user = await User.create(value)
+  // Hash plaintext password before storing
+  let passwordHash
+  try {
+    passwordHash = await hashPassword(value.password)
+  } catch (e) {
+    console.error('password hash error', e.message)
+    return res.status(500).json({ error: 'failed to process password' })
+  }
+
+  const user = await User.create({ email: value.email, passwordHash, fullname: value.fullname, username: value.username })
   await Portfolio.create({ userUsername: user.username, holdings: [] })
   res.json({ id: user._id, email: user.email, fullname: user.fullname, username: user.username, roles: user.roles })
 })
@@ -107,9 +137,15 @@ app.post('/users/register', async (req, res) => {
 app.post('/users/login', async (req, res) => {
   const { error, value } = credentialsSchema().validate(req.body)
   if (error) return res.status(400).json({ error: error.message })
-  const user = await User.findOne({ username: value.username, passwordHash: value.passwordHash }).select('email fullname username roles createdAt updatedAt')
+
+  const user = await User.findOne({ username: value.username })
   if (!user) return res.status(401).json({ error: 'invalid credentials' })
-  res.json({ user })
+
+  const ok = await comparePassword(value.password, user.passwordHash).catch(() => false)
+  if (!ok) return res.status(401).json({ error: 'invalid credentials' })
+
+  const safeUser = { email: user.email, fullname: user.fullname, username: user.username, roles: user.roles, createdAt: user.createdAt, updatedAt: user.updatedAt }
+  res.json({ user: safeUser })
 })
 
 // ===== Portfolio =====
