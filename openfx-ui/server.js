@@ -8,10 +8,11 @@ import cors from 'cors'
 import Joi from 'joi'
 import fetch from 'node-fetch'
 import bcrypt from 'bcryptjs'
+import jwt from 'jsonwebtoken'
 
 const app = express()
 
-const PORT = process.env.PORT
+const PORT = process.env.PORT || 4000
 const MONGO_URI = process.env.MONGO_URI
 const CORS_ORIGIN = process.env.CORS_ORIGIN
 
@@ -52,25 +53,20 @@ app.use(express.json())
 app.use(morgan('dev'))
 
 // ===== Helpers =====
+const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY
+if (!FINNHUB_API_KEY) throw new Error('FINNHUB_API_KEY missing — set it in .env')
+
 async function fetchQuote(symbol) {
-  const provider = (process.env.QUOTE_PROVIDER || '').toLowerCase()
   try {
-    if (provider === 'finnhub' && process.env.FINNHUB_API_KEY) {
-      const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${process.env.FINNHUB_API_KEY}`)
-      const j = await r.json()
-      const px = Number(j.c)
-      if (Number.isFinite(px) && px > 0) return px
-    }
-    if (provider === 'alphavantage' && process.env.ALPHAVANTAGE_API_KEY) {
-      const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${process.env.ALPHAVANTAGE_API_KEY}`)
-      const j = await r.json()
-      const px = Number(j?.['Global Quote']?.['05. price'])
-      if (Number.isFinite(px) && px > 0) return px
-    }
+    const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${FINNHUB_API_KEY}`)
+    const j = await r.json()
+    const px = Number(j?.c)
+    if (Number.isFinite(px) && px > 0) return px
+    console.error('finnhub returned invalid price for', symbol, j)
   } catch (e) {
-    console.error('quote error', e.message)
+    console.error('finnhub quote error', e && e.message ? e.message : e)
   }
-  // Dev fallback
+  // If finnhub fails, fall back to a deterministic dev price to keep app working
   return Number((50 + Math.random() * 150).toFixed(2))
 }
 
@@ -80,6 +76,7 @@ function credentialsSchema() {
 }
 
 const SALT_ROUNDS = Number(process.env.BCRYPT_SALT_ROUNDS) || 10
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret'
 
 function hashPassword(password) {
   return new Promise((resolve, reject) => {
@@ -94,6 +91,24 @@ function comparePassword(password, hash) {
 }
 
 async function verifyUserBody(req, res, next) {
+  // Prefer Authorization: Bearer <token>
+  const authHeader = req.header('authorization') || req.header('Authorization')
+  if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+    const token = authHeader.split(' ')[1]
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET)
+      const usernameFromToken = decoded?.username
+      if (!usernameFromToken) return res.status(401).json({ error: 'invalid token' })
+      const user = await User.findOne({ username: usernameFromToken })
+      if (!user) return res.status(401).json({ error: 'invalid token user' })
+      req.user = user
+      return next()
+    } catch (e) {
+      return res.status(401).json({ error: 'invalid token' })
+    }
+  }
+
+  // Fallback to username/password in body or headers (legacy)
   const username = (req.body?.username || req.header('x-username') || '').trim()
   const password = (req.body?.password || req.header('x-password') || '').trim()
   if (!username || !password) return res.status(401).json({ error: 'missing credentials', required: ['username', 'password'] })
@@ -145,7 +160,9 @@ app.post('/users/login', async (req, res) => {
   if (!ok) return res.status(401).json({ error: 'invalid credentials' })
 
   const safeUser = { email: user.email, fullname: user.fullname, username: user.username, roles: user.roles, createdAt: user.createdAt, updatedAt: user.updatedAt }
-  res.json({ user: safeUser })
+  // Issue a JWT token for subsequent requests
+  const token = jwt.sign({ username: user.username, roles: user.roles }, JWT_SECRET, { expiresIn: '6h' })
+  res.json({ user: safeUser, token })
 })
 
 // ===== Portfolio =====

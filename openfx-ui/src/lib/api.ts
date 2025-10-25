@@ -82,6 +82,43 @@ export async function register(username: string, email: string, fullname: string
   return res.json()
 }
 
+// Portfolio trade endpoints: buy and sell
+export async function portfolioBuy(symbol: string, quantity: number, username?: string, password?: string, token?: string): Promise<any> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  let body: string | undefined
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+    body = JSON.stringify({ symbol, quantity })
+  } else {
+    body = JSON.stringify({ username, password, symbol, quantity })
+  }
+
+  const res = await fetch(`${API_BASE}/portfolio/buy`, { method: 'POST', headers, body })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+  return res.json()
+}
+
+export async function portfolioSell(symbol: string, quantity: number, username?: string, password?: string, token?: string): Promise<any> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  let body: string | undefined
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+    body = JSON.stringify({ symbol, quantity })
+  } else {
+    body = JSON.stringify({ username, password, symbol, quantity })
+  }
+
+  const res = await fetch(`${API_BASE}/portfolio/sell`, { method: 'POST', headers, body })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+  return res.json()
+}
+
 // Build and download a CSV file for a PortfolioResponse
 export function downloadPortfolioCSV(portfolio: PortfolioResponse, filename?: string) {
   const headers = ['symbol', 'quantity', 'buyPrice', 'currentPrice', 'value', 'gain', 'gainPercent', 'addedAt']

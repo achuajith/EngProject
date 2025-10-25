@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { fetchPortfolio, downloadPortfolioCSV, login, register, type PortfolioResponse } from "@/lib/api";
+import { fetchPortfolio, downloadPortfolioCSV, login, register, portfolioBuy, portfolioSell, type PortfolioResponse } from "@/lib/api";
 import {
   LineChart,
   Line,
@@ -55,11 +55,7 @@ const samplePrices = Array.from({ length: 30 }).map((_, i) => ({
   volume: Math.round(100 + 50 * Math.cos(i / 5) + Math.random() * 20),
 }));
 
-const defaultHoldings = [
-  { symbol: "AAPL", qty: 10, avg: 172.3, last: 175.8 },
-  { symbol: "NVDA", qty: 4, avg: 930.0, last: 910.2 },
-  { symbol: "VTI", qty: 5, avg: 258.4, last: 260.9 },
-];
+const defaultHoldings: Array<{ symbol: string; qty: number; avg: number; last: number }> = [];
 
 const watchlistDefault = ["MSFT", "AMZN", "META", "GOOGL", "TSLA", "QQQ", "SPY"];
 
@@ -444,12 +440,13 @@ function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist
 }
 
 // —— Trade Page ——
-function TradePage() {
-  const [side, setSide] = useState("buy");
+function TradePage({ authToken, authUsername, authPassword, refreshPortfolio }: { authToken: string | null; authUsername: string | null; authPassword: string | null; refreshPortfolio: (u?: string|null,p?: string|null,t?: string|null)=>Promise<void> }) {
+  const [side, setSide] = useState<'buy'|'sell'>('buy');
   const [symbol, setSymbol] = useState("");
   const [qty, setQty] = useState("");
   const [orderType, setOrderType] = useState("market");
-  const [confirm, setConfirm] = useState(null);
+  const [confirm, setConfirm] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
 
   const estimatedCost = useMemo(() => {
     const price = samplePrices[samplePrices.length - 1].price;
@@ -457,9 +454,29 @@ function TradePage() {
     return q * price;
   }, [qty]);
 
-  function submitOrder() {
+  async function executeTrade(which: 'buy' | 'sell') {
     if (!symbol || Number(qty) <= 0) return setConfirm({ ok: false, msg: "Please enter a symbol and quantity" });
-    setConfirm({ ok: true, msg: `${side.toUpperCase()} ${qty} ${symbol} (${orderType}) — est. ${format(estimatedCost)}` });
+    setLoading(true)
+    setConfirm(null)
+    try {
+      const q = Number(qty)
+      const token = authToken ?? null
+      let res
+      if (which === 'buy') {
+        res = await portfolioBuy(symbol, q, authUsername ?? undefined, authPassword ?? undefined, token ?? undefined)
+      } else {
+        res = await portfolioSell(symbol, q, authUsername ?? undefined, authPassword ?? undefined, token ?? undefined)
+      }
+      // Show success and refresh portfolio
+      const tradePrice = res?.tradePrice ?? res?.portfolio?.holdings?.find((h:any)=>h.symbol===symbol)?.currentPrice
+      setConfirm({ ok: true, msg: `${which.toUpperCase()} ${q} ${symbol} executed @ ${tradePrice}` })
+      // refresh portfolio using token if present
+      await refreshPortfolio(undefined, undefined, token ?? undefined)
+    } catch (e:any) {
+      setConfirm({ ok: false, msg: e?.message || String(e) })
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -468,7 +485,7 @@ function TradePage() {
         <CardHeader className="flex items-center justify-between">
           <div>
             <CardTitle>Place Order</CardTitle>
-            <CardDescription>Simulated order ticket for demo</CardDescription>
+            <CardDescription>Live trade ticket — calls backend endpoints</CardDescription>
           </div>
           <Badge variant={side === "buy" ? "default" : "destructive"} className="text-base capitalize">{side}</Badge>
         </CardHeader>
@@ -488,12 +505,12 @@ function TradePage() {
               </SelectContent>
             </Select>
             <div className="flex gap-2 mt-2">
-              <Button onClick={() => setSide("buy")} disabled={!symbol || !qty}><PlusCircle className="h-4 w-4 mr-1" />Buy</Button>
-              <Button variant="destructive" onClick={() => setSide("sell")} disabled={!symbol || !qty}><MinusCircle className="h-4 w-4 mr-1" />Sell</Button>
+              <Button onClick={() => { setSide('buy'); executeTrade('buy') }} disabled={!symbol || !qty || loading}><PlusCircle className="h-4 w-4 mr-1" />Buy</Button>
+              <Button variant="destructive" onClick={() => { setSide('sell'); executeTrade('sell') }} disabled={!symbol || !qty || loading}><MinusCircle className="h-4 w-4 mr-1" />Sell</Button>
             </div>
             <div className="text-sm text-muted-foreground mt-2">Estimated cost: <span className="font-medium">{format(estimatedCost)}</span></div>
             <div className="flex gap-2 mt-2">
-              <Button onClick={submitOrder} disabled={!symbol || !qty}>Submit Order</Button>
+              <Button onClick={() => executeTrade(side)} disabled={!symbol || !qty || loading}>{loading ? 'Working…' : 'Submit Order'}</Button>
             </div>
             {confirm && (
               <div className={`mt-3 p-3 rounded-md ${confirm.ok ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"}`}>{confirm.msg}</div>
@@ -504,7 +521,7 @@ function TradePage() {
             <Card className="border-dashed rounded-2xl">
               <CardHeader>
                 <CardTitle className="text-base">Price Chart</CardTitle>
-                <CardDescription>Last 30 days</CardDescription>
+                <CardDescription>Last 30 days (demo)</CardDescription>
               </CardHeader>
               <CardContent className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
@@ -703,8 +720,8 @@ export default function App() {
       setAuthToken(token)
       setAuthed(true)
       setRoute('portfolio')
-      // load portfolio using token
-      void loadPortfolioFromApi(undefined, undefined)
+      // load portfolio using token directly to avoid state update race
+      void loadPortfolioFromApi(undefined, undefined, token)
     } else if (username) {
       // username can be remembered, but password must be re-entered for security
       setAuthUsername(username)
@@ -731,8 +748,12 @@ export default function App() {
 
       setAuthed(true)
       setRoute('portfolio')
-      // load portfolio using token if available
-      await loadPortfolioFromApi(undefined, undefined)
+      // load portfolio using token if available — pass token explicitly to avoid race with state updates
+      if (token) {
+        await loadPortfolioFromApi(undefined, undefined, token)
+      } else {
+        await loadPortfolioFromApi(username, password, undefined)
+      }
     } catch (e: any) {
       const msg = e?.message || String(e)
       setAuthError(msg)
@@ -754,10 +775,10 @@ export default function App() {
 
   const showAdmin = role === "admin";
 
-  async function loadPortfolioFromApi(usernameArg?: string | null, passwordArg?: string | null) {
+  async function loadPortfolioFromApi(usernameArg?: string | null, passwordArg?: string | null, tokenArg?: string | null) {
     const username = usernameArg ?? authUsername;
     const password = passwordArg ?? authPassword;
-    const token = authToken ?? undefined;
+    const token = tokenArg ?? authToken ?? undefined;
     if (!token && (!username || !password)) return setPortfolioError('Missing credentials: please login first');
     setPortfolioError(null)
     setPortfolioLoading(true)
@@ -801,7 +822,7 @@ export default function App() {
               {showAdmin && (<TabsTrigger value="admin"><Shield className="h-4 w-4 mr-1" />Admin</TabsTrigger>)}
             </TabsList>
             <TabsContent value="portfolio"><PortfolioPage holdings={holdings} setHoldings={setHoldings} currency={currency} setCurrency={setCurrency} watchlist={watchlist} setWatchlist={setWatchlist} onLoadFromApi={loadPortfolioFromApi} onDownloadApi={downloadApiCSV} loading={portfolioLoading} error={portfolioError} /></TabsContent>
-            <TabsContent value="trade"><TradePage /></TabsContent>
+            <TabsContent value="trade"><TradePage authToken={authToken} authUsername={authUsername} authPassword={authPassword} refreshPortfolio={loadPortfolioFromApi} /></TabsContent>
             <TabsContent value="preferences"><PreferencesPage currency={currency} setCurrency={setCurrency} /></TabsContent>
             {showAdmin && (<TabsContent value="admin"><AdminDashboard /></TabsContent>)}
           </Tabs>
