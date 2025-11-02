@@ -1,5 +1,7 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { fetchPortfolio, downloadPortfolioCSV, login, register, portfolioBuy, portfolioSell, type PortfolioResponse } from "@/lib/api";
+import { fetchPortfolio, downloadPortfolioCSV, login, register, portfolioBuy, portfolioSell, type PortfolioResponse, type StockSearchResult, searchStocks } from "@/lib/api";
+import { StockSearch } from "@/components/ui/stock-search";
+
 import {
   LineChart,
   Line,
@@ -68,7 +70,8 @@ function format(n, currency = "USD") {
 const COLORS = ["#06b6d4", "#3b82f6", "#10b981", "#f59e0b", "#ef4444"];
 
 // —— Top Navigation ——
-function TopNav({ route, setRoute, role, setRole, isAuthed, onLogout, onLogin, dark, setDark }) {
+function TopNav({ route, setRoute, role, setRole, isAuthed, onLogout, onLogin, dark, setDark, onQuickSearch }) {
+  const [quickQuery, setQuickQuery] = useState('')
   useEffect(() => {
     // apply dark mode to html/body for Tailwind dark variants
     if (dark) document.documentElement.classList.add("dark");
@@ -95,8 +98,16 @@ function TopNav({ route, setRoute, role, setRole, isAuthed, onLogout, onLogin, d
 
         <div className="ml-auto flex items-center gap-2">
           <div className="hidden sm:flex items-center gap-2">
-            <Search className="h-4 w-4" />
-            <Input placeholder="Search symbols, users…" className="w-[220px]" />
+            <Input
+              placeholder="Search Symbol"
+              className="w-[220px]"
+              value={quickQuery}
+              onChange={(e) => setQuickQuery(e.target.value)}
+              onKeyPress={(e) => { if (e.key === 'Enter') onQuickSearch?.(quickQuery) }}
+            />
+            <Button onClick={() => onQuickSearch?.(quickQuery)}>
+              <Search className="h-4 w-4" />
+            </Button>
           </div>
 
           <button aria-label="Notifications" className="relative p-2 rounded-md hover:bg-muted/30">
@@ -328,8 +339,6 @@ function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist
           <div className="flex gap-2 items-center">
             <Input placeholder="Filter symbol…" className="w-[200px]" />
             <Button variant="outline" onClick={exportCSV}><Activity className="h-4 w-4 mr-1" />Export CSV</Button>
-            <Button variant="outline" onClick={onLoadFromApi}><Activity className="h-4 w-4 mr-1" />Load from API</Button>
-            <Button variant="outline" onClick={onDownloadApi}><Activity className="h-4 w-4 mr-1" />Download API CSV</Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -440,38 +449,42 @@ function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist
 }
 
 // —— Trade Page ——
-function TradePage({ authToken, authUsername, authPassword, refreshPortfolio }: { authToken: string | null; authUsername: string | null; authPassword: string | null; refreshPortfolio: (u?: string|null,p?: string|null,t?: string|null)=>Promise<void> }) {
+function TradePage({ authToken, authUsername, authPassword, refreshPortfolio, initialStock }: { authToken: string | null; authUsername: string | null; authPassword: string | null; refreshPortfolio: (u?: string|null,p?: string|null,t?: string|null)=>Promise<void>; initialStock?: StockSearchResult | null }) {
+  const [selectedStock, setSelectedStock] = useState<StockSearchResult | null>(null);
+  useEffect(() => {
+    if (initialStock) setSelectedStock(initialStock)
+  }, [initialStock])
+  const [quantity, setQuantity] = useState('');
   const [side, setSide] = useState<'buy'|'sell'>('buy');
-  const [symbol, setSymbol] = useState("");
-  const [qty, setQty] = useState("");
-  const [orderType, setOrderType] = useState("market");
-  const [confirm, setConfirm] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [confirm, setConfirm] = useState<any>(null);
 
   const estimatedCost = useMemo(() => {
-    const price = samplePrices[samplePrices.length - 1].price;
-    const q = Number(qty || 0);
-    return q * price;
-  }, [qty]);
+    if (!selectedStock || !quantity) return 0;
+    return selectedStock.price * Number(quantity);
+  }, [selectedStock, quantity]);
 
   async function executeTrade(which: 'buy' | 'sell') {
-    if (!symbol || Number(qty) <= 0) return setConfirm({ ok: false, msg: "Please enter a symbol and quantity" });
+    if (!selectedStock || !quantity || Number(quantity) <= 0) return setConfirm({ ok: false, msg: "Please select a stock and enter quantity" });
     setLoading(true)
     setConfirm(null)
     try {
-      const q = Number(qty)
+      const q = Number(quantity)
       const token = authToken ?? null
       let res
       if (which === 'buy') {
-        res = await portfolioBuy(symbol, q, authUsername ?? undefined, authPassword ?? undefined, token ?? undefined)
+        res = await portfolioBuy(selectedStock.symbol, q, authUsername ?? undefined, authPassword ?? undefined, token ?? undefined)
       } else {
-        res = await portfolioSell(symbol, q, authUsername ?? undefined, authPassword ?? undefined, token ?? undefined)
+        res = await portfolioSell(selectedStock.symbol, q, authUsername ?? undefined, authPassword ?? undefined, token ?? undefined)
       }
       // Show success and refresh portfolio
-      const tradePrice = res?.tradePrice ?? res?.portfolio?.holdings?.find((h:any)=>h.symbol===symbol)?.currentPrice
-      setConfirm({ ok: true, msg: `${which.toUpperCase()} ${q} ${symbol} executed @ ${tradePrice}` })
+      const tradePrice = res?.tradePrice ?? selectedStock.price
+      setConfirm({ ok: true, msg: `${which.toUpperCase()} ${q} ${selectedStock.symbol} executed @ ${tradePrice}` })
       // refresh portfolio using token if present
       await refreshPortfolio(undefined, undefined, token ?? undefined)
+      // Reset form
+      setSelectedStock(null)
+      setQuantity('')
     } catch (e:any) {
       setConfirm({ ok: false, msg: e?.message || String(e) })
     } finally {
@@ -484,55 +497,95 @@ function TradePage({ authToken, authUsername, authPassword, refreshPortfolio }: 
       <Card className="rounded-2xl">
         <CardHeader className="flex items-center justify-between">
           <div>
-            <CardTitle>Place Order</CardTitle>
-            <CardDescription>Live trade ticket — calls backend endpoints</CardDescription>
+            <CardTitle>Search & Trade</CardTitle>
+            <CardDescription>Search for stocks and place trades</CardDescription>
           </div>
-          <Badge variant={side === "buy" ? "default" : "destructive"} className="text-base capitalize">{side}</Badge>
+          {selectedStock && (
+            <Badge variant={side === "buy" ? "default" : "destructive"} className="text-base capitalize">{side}</Badge>
+          )}
         </CardHeader>
-        <CardContent className="grid md:grid-cols-3 gap-6">
-          <div className="grid gap-3">
-            <Label>Symbol</Label>
-            <Input placeholder="AAPL" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} />
-            <Label>Quantity</Label>
-            <Input type="number" placeholder="10" value={qty} onChange={(e) => setQty(e.target.value)} />
-            <Label>Order Type</Label>
-            <Select value={orderType} onValueChange={setOrderType}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="market">Market</SelectItem>
-                <SelectItem value="limit">Limit</SelectItem>
-                <SelectItem value="stop">Stop</SelectItem>
-              </SelectContent>
-            </Select>
-            <div className="flex gap-2 mt-2">
-              <Button onClick={() => { setSide('buy'); executeTrade('buy') }} disabled={!symbol || !qty || loading}><PlusCircle className="h-4 w-4 mr-1" />Buy</Button>
-              <Button variant="destructive" onClick={() => { setSide('sell'); executeTrade('sell') }} disabled={!symbol || !qty || loading}><MinusCircle className="h-4 w-4 mr-1" />Sell</Button>
-            </div>
-            <div className="text-sm text-muted-foreground mt-2">Estimated cost: <span className="font-medium">{format(estimatedCost)}</span></div>
-            <div className="flex gap-2 mt-2">
-              <Button onClick={() => executeTrade(side)} disabled={!symbol || !qty || loading}>{loading ? 'Working…' : 'Submit Order'}</Button>
-            </div>
-            {confirm && (
-              <div className={`mt-3 p-3 rounded-md ${confirm.ok ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"}`}>{confirm.msg}</div>
+        <CardContent className="grid md:grid-cols-2 gap-6">
+          <div className="flex flex-col gap-4">
+            <StockSearch 
+              onSelect={setSelectedStock}
+              disabled={loading}
+              token={authToken ?? undefined}
+            />
+            
+            {selectedStock && (
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="grid gap-4">
+                    <div>
+                      <h3 className="font-medium">{selectedStock.symbol} - {selectedStock.name}</h3>
+                      <p className="text-lg font-semibold mt-1">{selectedStock.price} {selectedStock.currency}</p>
+                      {selectedStock.change != null && (
+                        <p className={`text-sm ${selectedStock.change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          {selectedStock.change >= 0 ? '+' : ''}{selectedStock.change.toFixed(2)} ({selectedStock.changePercent?.toFixed(2)}%)
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="quantity">Quantity</Label>
+                      <Input
+                        id="quantity"
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={quantity}
+                        onChange={(e) => setQuantity(e.target.value)}
+                        disabled={loading}
+                      />
+                    </div>
+
+                    {quantity && (
+                      <p className="text-sm text-gray-500">
+                        Total {side === 'buy' ? 'Cost' : 'Value'}: {selectedStock.price * Number(quantity)} {selectedStock.currency}
+                      </p>
+                    )}
+
+                    <div className="flex gap-2">
+                      <Button 
+                        onClick={() => { setSide('buy'); executeTrade('buy'); }}
+                        disabled={loading || !quantity || Number(quantity) <= 0}
+                      >
+                        <PlusCircle className="h-4 w-4 mr-1" />Buy
+                      </Button>
+                      <Button 
+                        variant="destructive"
+                        onClick={() => { setSide('sell'); executeTrade('sell'); }}
+                        disabled={loading || !quantity || Number(quantity) <= 0}
+                      >
+                        <MinusCircle className="h-4 w-4 mr-1" />Sell
+                      </Button>
+                    </div>
+
+                    {confirm && (
+                      <div className={`p-3 rounded-md ${confirm.ok ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : "bg-rose-50 text-rose-800 dark:bg-rose-950 dark:text-rose-200"}`}>
+                        {confirm.msg}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </div>
 
-          <div className="md:col-span-2">
-            <Card className="border-dashed rounded-2xl">
-              <CardHeader>
-                <CardTitle className="text-base">Price Chart</CardTitle>
-                <CardDescription>Last 30 days (demo)</CardDescription>
-              </CardHeader>
-              <CardContent className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={samplePrices}>
-                    <XAxis dataKey="day" /><YAxis /><Tooltip />
-                    <Line type="monotone" dataKey="price" stroke="#3b82f6" dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </div>
+          <Card className="border-dashed rounded-2xl">
+            <CardHeader>
+              <CardTitle className="text-base">Price Chart</CardTitle>
+              <CardDescription>Last 30 days (demo)</CardDescription>
+            </CardHeader>
+            <CardContent className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={samplePrices}>
+                  <XAxis dataKey="day" /><YAxis /><Tooltip />
+                  <Line type="monotone" dataKey="price" stroke="#3b82f6" dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
         </CardContent>
       </Card>
 
@@ -700,10 +753,10 @@ export default function App() {
   const [role, setRole] = useState("user");
   const [isAuthed, setAuthed] = useState(false);
   const [currency, setCurrency] = useState("USD");
+  const [apiPortfolio, setApiPortfolio] = useState<PortfolioResponse | null>(null);
   const [holdings, setHoldings] = useState(defaultHoldings);
   const [watchlist, setWatchlist] = useState(watchlistDefault);
   const [dark, setDark] = useState(false);
-  const [apiPortfolio, setApiPortfolio] = useState<PortfolioResponse | null>(null);
   const [authUsername, setAuthUsername] = useState<string | null>(null);
   const [authPassword, setAuthPassword] = useState<string | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
@@ -711,6 +764,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [portfolioLoading, setPortfolioLoading] = useState(false);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
+  const [tradeInitialStock, setTradeInitialStock] = useState<StockSearchResult | null>(null);
 
   // On mount, restore session from localStorage if present
   useEffect(() => {
@@ -727,6 +781,25 @@ export default function App() {
       setAuthUsername(username)
     }
   }, [])
+
+  // Quick search handler called by TopNav
+  async function handleQuickSearch(query: string) {
+    const q = String(query || '').trim()
+    if (!q) return
+    try {
+      const results = await searchStocks(q, authToken ?? undefined)
+      if (results && results.length > 0) {
+        setTradeInitialStock(results[0])
+        setRoute('trade')
+      } else {
+        // No results — simple UX: alert for now
+        alert('No results found for "' + q + '"')
+      }
+    } catch (e:any) {
+      console.error('quick search error', e)
+      alert('Search failed: ' + (e?.message || String(e)))
+    }
+  }
 
   const onLoginSuccess = async (username: string, password: string) => {
     setAuthError(null);
@@ -795,14 +868,9 @@ export default function App() {
     }
   }
 
-  function downloadApiCSV() {
-    if (!apiPortfolio) return window.alert("No API portfolio loaded. Load first using 'Load from API'.");
-    downloadPortfolioCSV(apiPortfolio);
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
-      <TopNav route={route} setRoute={setRoute} role={role} setRole={setRole} isAuthed={isAuthed} onLogout={onLogout} onLogin={onLogin} dark={dark} setDark={setDark} />
+      <TopNav route={route} setRoute={setRoute} role={role} setRole={setRole} isAuthed={isAuthed} onLogout={onLogout} onLogin={onLogin} dark={dark} setDark={setDark} onQuickSearch={handleQuickSearch} />
 
       {!isAuthed && (route === "login" || route === "register" || route === "forgot") && (
         <main className="py-8">
@@ -821,10 +889,37 @@ export default function App() {
               <TabsTrigger value="preferences"><Settings className="h-4 w-4 mr-1" />Preferences</TabsTrigger>
               {showAdmin && (<TabsTrigger value="admin"><Shield className="h-4 w-4 mr-1" />Admin</TabsTrigger>)}
             </TabsList>
-            <TabsContent value="portfolio"><PortfolioPage holdings={holdings} setHoldings={setHoldings} currency={currency} setCurrency={setCurrency} watchlist={watchlist} setWatchlist={setWatchlist} onLoadFromApi={loadPortfolioFromApi} onDownloadApi={downloadApiCSV} loading={portfolioLoading} error={portfolioError} /></TabsContent>
-            <TabsContent value="trade"><TradePage authToken={authToken} authUsername={authUsername} authPassword={authPassword} refreshPortfolio={loadPortfolioFromApi} /></TabsContent>
-            <TabsContent value="preferences"><PreferencesPage currency={currency} setCurrency={setCurrency} /></TabsContent>
-            {showAdmin && (<TabsContent value="admin"><AdminDashboard /></TabsContent>)}
+            <TabsContent value="portfolio">
+              <PortfolioPage 
+                holdings={holdings} 
+                setHoldings={setHoldings} 
+                currency={currency} 
+                setCurrency={setCurrency} 
+                watchlist={watchlist} 
+                setWatchlist={setWatchlist} 
+                onLoadFromApi={loadPortfolioFromApi} 
+                onDownloadApi={() => downloadPortfolioCSV(apiPortfolio)} 
+                loading={portfolioLoading} 
+                error={portfolioError}
+              />
+            </TabsContent>
+            <TabsContent value="trade">
+              <TradePage 
+                authToken={authToken} 
+                authUsername={authUsername} 
+                authPassword={authPassword} 
+                refreshPortfolio={loadPortfolioFromApi}
+                initialStock={tradeInitialStock}
+              />
+            </TabsContent>
+            <TabsContent value="preferences">
+              <PreferencesPage currency={currency} setCurrency={setCurrency} />
+            </TabsContent>
+            {showAdmin && (
+              <TabsContent value="admin">
+                <AdminDashboard />
+              </TabsContent>
+            )}
           </Tabs>
         </main>
       )}

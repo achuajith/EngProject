@@ -258,6 +258,137 @@ app.post('/portfolio/sell', verifyUserBody, async (req, res) => {
   res.json({ ok: true, action: 'sell', symbol, quantity: qty, tradePrice, realizedPnl, portfolio: p })
 })
 
+// ===== Stocks search =====
+// GET /stocks/search?q=TERM
+app.get('/stocks/search', async (req, res) => {
+  const q = String(req.query.q || '').trim()
+  if (!q) return res.status(400).json({ error: 'missing query parameter q' })
+
+  try {
+    // Use Finnhub symbol search
+    const searchUrl = `https://finnhub.io/api/v1/search?q=${encodeURIComponent(q)}&token=${FINNHUB_API_KEY}`
+    const r = await fetch(searchUrl)
+    if (!r.ok) return res.status(502).json({ error: 'symbol search failed' })
+    const j = await r.json()
+    const results = Array.isArray(j.result) ? j.result.slice(0, 10) : []
+
+    // For each symbol, fetch a realtime quote in parallel (limit to first 8 for speed)
+    const take = results.slice(0, 8)
+    const out = await Promise.all(take.map(async (it) => {
+      try {
+        const sym = it.symbol
+        const desc = it.description || it.currency || ''
+        const quoteRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${FINNHUB_API_KEY}`)
+        const qj = await quoteRes.json()
+        const price = Number(qj?.c) || null
+        const change = (typeof qj?.d === 'number') ? Number(qj.d) : null
+        const changePercent = (typeof qj?.dp === 'number') ? Number(qj.dp) : null
+        return { symbol: sym, name: desc || '', price, currency: 'USD', change, changePercent }
+      } catch (e) {
+        return { symbol: it.symbol, name: it.description || '', price: null, currency: 'USD' }
+      }
+    }))
+
+    res.json(out)
+  } catch (e) {
+    console.error('stocks search error', e && e.message ? e.message : e)
+    res.status(500).json({ error: 'stocks search failed' })
+  }
+})
+
+// ===== Performance aggregation =====
+// GET /performance/portfolio?days=30
+// Returns [{ day: 'YYYY-MM-DD', value: number }, ...]
+const candlesCache = {} // key -> { ts: number, data: { t: [...], c: [...] } }
+const CACHE_TTL = 10 * 60 * 1000 // 10 minutes
+
+app.get('/performance/portfolio', verifyUserBody, async (req, res) => {
+  const days = Math.min(90, Math.max(1, Number(req.query.days || 30)))
+  try {
+    const p = await Portfolio.findOne({ userUsername: req.user.username })
+    if (!p) return res.status(404).json({ error: 'portfolio not found' })
+
+    const symbols = [...new Set(p.holdings.map(h => h.symbol))].slice(0, 8)
+
+    const to = Math.floor(Date.now() / 1000)
+    const from = to - days * 24 * 60 * 60
+
+    // helper to fetch candles for a symbol (with cache)
+    async function fetchCandles(sym) {
+      const key = `${sym}:${from}:${to}`
+      const cached = candlesCache[key]
+      if (cached && (Date.now() - cached.ts) < CACHE_TTL) return cached.data
+      try {
+        const url = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(sym)}&resolution=D&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`
+        const r = await fetch(url)
+        if (!r.ok) return null
+        const j = await r.json()
+        if (j.s !== 'ok' || !Array.isArray(j.t) || !Array.isArray(j.c)) return null
+        const data = { t: j.t, c: j.c }
+        candlesCache[key] = { ts: Date.now(), data }
+        return data
+      } catch (e) {
+        return null
+      }
+    }
+
+    // fetch candles in parallel
+    const candlesList = await Promise.all(symbols.map(s => fetchCandles(s)))
+
+    // choose master timestamps from first non-null candles
+    let masterT = null
+    for (const cd of candlesList) {
+      if (cd && Array.isArray(cd.t) && cd.t.length > 0) { masterT = cd.t; break }
+    }
+    if (!masterT) {
+      // no market data available, return zeros for last N days
+      const out = []
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(); d.setUTCDate(d.getUTCDate() - i)
+        out.push({ day: d.toISOString().slice(0, 10), value: 0 })
+      }
+      return res.json(out)
+    }
+
+    // build per-symbol map of timestamp->close, forward-fill missing
+    const symbolPriceMaps = {}
+    for (let idx = 0; idx < symbols.length; idx++) {
+      const s = symbols[idx]
+      const cd = candlesList[idx]
+      const map = {}
+      if (cd) {
+        for (let i = 0; i < cd.t.length; i++) map[String(cd.t[i])] = cd.c[i]
+      }
+      // forward-fill across masterT
+      let last = null
+      for (const ts of masterT) {
+        const v = map[String(ts)]
+        if (v == null) map[String(ts)] = last
+        else last = map[String(ts)]
+      }
+      symbolPriceMaps[s] = map
+    }
+
+    // compute daily total: sum(quantity * close)
+    const out = masterT.map((ts) => {
+      const date = new Date(ts * 1000).toISOString().slice(0, 10)
+      let total = 0
+      for (const h of p.holdings) {
+        const sym = h.symbol
+        const qty = h.quantity || 0
+        const price = Number(symbolPriceMaps[sym]?.[String(ts)] ?? 0) || 0
+        total += qty * price
+      }
+      return { day: date, value: Number(total.toFixed(2)) }
+    })
+
+    return res.json(out)
+  } catch (e) {
+    console.error('performance error', e && e.message ? e.message : e)
+    return res.status(500).json({ error: 'performance fetch failed' })
+  }
+})
+
 // ===== Start =====
 app.listen(PORT, () => {
   console.log(`API on http://localhost:${PORT}`)

@@ -1,10 +1,4 @@
-// Lightweight API helpers for calling the backend and downloading CSVs
-// Usage:
-// import { fetchPortfolio, downloadPortfolioCSV } from '@/lib/api'
-// const data = await fetchPortfolio(username, passwordHash)
-// downloadPortfolioCSV(data)
-
-export const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:4000'
+export const API_BASE = (import.meta as any).env?.VITE_API_URL
 
 export type Holding = {
   symbol: string
@@ -142,4 +136,51 @@ function csvSafe(v: any) {
   const s = String(v)
   if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g, '""')}"`
   return s
+}
+
+// Stock search API
+export type StockSearchResult = {
+  symbol: string
+  name: string
+  price: number
+  currency: string
+  change?: number
+  changePercent?: number
+}
+
+export async function searchStocks(query: string, token?: string): Promise<StockSearchResult[]> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const res = await fetch(`${API_BASE}/stocks/search?q=${encodeURIComponent(query)}`, {
+    method: 'GET',
+    headers
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+
+  return res.json()
+}
+
+// Fetch aggregated portfolio performance from the server
+export type PerformancePoint = { day: string; value: number }
+export async function fetchPerformance(days = 30, username?: string, password?: string, token?: string): Promise<PerformancePoint[]> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  else {
+    if (username) headers['x-username'] = username
+    if (password) headers['x-password'] = password
+  }
+
+  const res = await fetch(`${API_BASE}/performance/portfolio?days=${Number(days)}`, { method: 'GET', headers })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+  return res.json()
 }
