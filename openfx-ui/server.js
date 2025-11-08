@@ -292,14 +292,8 @@ app.get('/stocks/quote', async (req, res) => {
     const encodedSymbol = encodeURIComponent(symbol)
     const quoteUrl = `https://finnhub.io/api/v1/quote?symbol=${encodedSymbol}&token=${FINNHUB_API_KEY}`
     const r = await fetch(quoteUrl)
-    const responseText = await r.text() // Get raw response text
-    console.log(`Finnhub quote response for ${symbol}:`, {
-      status: r.status,
-      statusText: r.statusText,
-      headers: Object.fromEntries(r.headers.entries()),
-      body: responseText
-    })
-    
+    const responseText = await r.text() 
+
     if (!r.ok) {
       return res.status(502).json({ 
         error: 'quote fetch failed', 
@@ -355,14 +349,6 @@ app.get('/stocks/search', async (req, res) => {
     const searchUrl = `https://finnhub.io/api/v1/search?q=${encodeURIComponent(q)}&token=${FINNHUB_API_KEY}`
     const response = await fetch(searchUrl)
     const responseText = await response.text()
-    
-    console.log(`Finnhub search response for ${q}:`, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
-      body: responseText
-    })
-    
     if (!response.ok) {
       return res.status(502).json({ 
         error: 'symbol search failed', 

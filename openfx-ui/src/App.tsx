@@ -60,8 +60,6 @@ const samplePrices = Array.from({ length: 30 }).map((_, i) => ({
 
 const defaultHoldings: Array<{ symbol: string; qty: number; avg: number; last: number }> = [];
 
-const watchlistDefault = ["MSFT", "AMZN", "META", "GOOGL", "TSLA", "QQQ", "SPY"];
-
 function format(n, currency = "USD") {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n);
 }
@@ -106,23 +104,23 @@ function TopNav({ route, setRoute, role, setRole, isAuthed, onLogout, onLogin, d
               onChange={(e) => setQuickQuery(e.target.value)}
               onKeyPress={(e) => { if (e.key === 'Enter') onQuickSearch?.(quickQuery) }}
             />
-            <Button onClick={() => onQuickSearch?.(quickQuery)}>
+            <Button onClick={() => onQuickSearch?.(quickQuery)} className="cursor-pointer transition-all hover:scale-105">
               <Search className="h-4 w-4" />
             </Button>
           </div>
 
-          <button aria-label="Notifications" className="relative p-2 rounded-md hover:bg-muted/30">
+          <button aria-label="Notifications" className="relative p-2 rounded-md hover:bg-muted/30 cursor-pointer transition-all hover:scale-105">
             <Bell className="h-5 w-5" />
             <span className="absolute -top-0.5 -right-0.5 text-[11px] bg-rose-500 text-white rounded-full px-1">3</span>
           </button>
 
-          <button onClick={() => setDark(!dark)} className="p-2 rounded-md hover:bg-muted/30">
+          <button onClick={() => setDark(!dark)} className="p-2 rounded-md hover:bg-muted/30 cursor-pointer transition-all hover:scale-105">
             {dark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
           </button>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="p-2 rounded-md hover:bg-muted/30 flex items-center gap-2">
+              <button className="p-2 rounded-md hover:bg-muted/30 flex items-center gap-2 cursor-pointer transition-all hover:scale-105">
                 <MoreHorizontal className="h-4 w-4" />
               </button>
             </DropdownMenuTrigger>
@@ -176,11 +174,11 @@ function LoginScreen({ onSuccess, onForgot, goRegister, loading, serverError }: 
             <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
           </div>
           <div className="flex items-center justify-between">
-            <Button className="w-full" onClick={tryLogin} disabled={!!loading}><LogIn className="h-4 w-4 mr-1" />{loading ? 'Logging in…' : 'Login'}</Button>
+            <Button className="w-full  cursor-pointer transition-all hover:scale-105" onClick={tryLogin} disabled={!!loading}><LogIn className="h-4 w-4 mr-1" />{loading ? 'Logging in…' : 'Login'}</Button>
           </div>
           <div className="flex justify-between text-sm">
-            <Button variant="link" className="px-0" onClick={onForgot}>Forgot password?</Button>
-            <Button variant="link" className="px-0" onClick={goRegister}>Create account</Button>
+            <Button variant="link" className="px-0  cursor-pointer transition-all hover:scale-105" onClick={onForgot}>Forgot password?</Button>
+            <Button variant="link" className="px-0  cursor-pointer transition-all hover:scale-105" onClick={goRegister}>Create account</Button>
           </div>
         </CardContent>
       </Card>
@@ -240,8 +238,8 @@ function RegisterScreen({ goLogin }) {
             <Switch id="tos" />
             <Label htmlFor="tos" className="text-sm">I agree to the Terms</Label>
           </div>
-          <Button onClick={submit} disabled={loading}><UserPlus className="h-4 w-4 mr-1" />{loading ? 'Registering…' : 'Register'}</Button>
-          <Button variant="link" className="px-0" onClick={goLogin}>Have an account? Login</Button>
+          <Button onClick={submit} disabled={loading}><UserPlus className="h-4 w-4 mr-1  cursor-pointer transition-all hover:scale-105" />{loading ? 'Registering…' : 'Register'}</Button>
+          <Button variant="link" className="px-0  cursor-pointer transition-all hover:scale-105" onClick={goLogin}>Have an account? Login</Button>
         </CardContent>
       </Card>
     </div>
@@ -261,8 +259,8 @@ function ForgotPasswordScreen({ goLogin }) {
             <Label htmlFor="email">Email</Label>
             <Input id="email" type="email" placeholder="you@example.com" />
           </div>
-          <Button onClick={goLogin}><KeyRound className="h-4 w-4 mr-1" />Send reset link</Button>
-          <Button variant="link" className="px-0" onClick={goLogin}>Back to login</Button>
+          <Button onClick={goLogin}><KeyRound className="h-4 w-4 mr-1  cursor-pointer transition-all hover:scale-105" />Send reset link</Button>
+          <Button variant="link" className="px-0  cursor-pointer transition-all hover:scale-105" onClick={goLogin}>Back to login</Button>
         </CardContent>
       </Card>
     </div>
@@ -270,7 +268,7 @@ function ForgotPasswordScreen({ goLogin }) {
 }
 
 // —— Portfolio Page ——
-function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist, setWatchlist, onLoadFromApi, onDownloadApi, loading, error }: { holdings:any; setHoldings:any; currency:any; setCurrency:any; watchlist:any; setWatchlist:any; onLoadFromApi: ()=>void; onDownloadApi: ()=>void; loading?: boolean; error?: string | null }) {
+function PortfolioPage({ holdings, setHoldings, currency, setCurrency, onLoadFromApi, onDownloadApi, loading, error }: { holdings:any; setHoldings:any; currency:any; setCurrency:any; onLoadFromApi: ()=>void; onDownloadApi: ()=>void; loading?: boolean; error?: string | null }) {
   const totals = useMemo(() => {
     const mv = holdings.reduce((s, h) => s + h.qty * h.last, 0);
     const cost = holdings.reduce((s, h) => s + h.qty * h.avg, 0);
@@ -343,7 +341,7 @@ function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist
             </div>
             <div className="flex gap-2 items-center">
               <Input placeholder="Filter symbol…" className="w-[200px]" />
-              <Button variant="outline" onClick={exportCSV}><Activity className="h-4 w-4 mr-1" />Export CSV</Button>
+              <Button variant="outline" onClick={exportCSV}><Activity className="h-4 w-4 mr-1  cursor-pointer transition-all hover:scale-105" />Export CSV</Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -376,8 +374,8 @@ function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist
                         <td className={pl >= 0 ? "text-emerald-600" : "text-rose-600"}>{format(pl)}</td>
                         <td className="text-right">
                           <div className="flex gap-2 justify-end">
-                            <Button variant="outline" size="sm"><PlusCircle className="h-4 w-4 mr-1" />Buy</Button>
-                            <Button variant="outline" size="sm"><MinusCircle className="h-4 w-4 mr-1" />Sell</Button>
+                            <Button variant="outline" size="sm"><PlusCircle className="h-4 w-4 mr-1  cursor-pointer transition-all hover:scale-105" />Buy</Button>
+                            <Button variant="outline" size="sm"><MinusCircle className="h-4 w-4 mr-1  cursor-pointer transition-all hover:scale-105" />Sell</Button>
                           </div>
                         </td>
                       </tr>
@@ -417,22 +415,6 @@ function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist
           </CardContent>
         </Card>
       </div>
-
-      <Card className="rounded-2xl">
-        <CardHeader>
-          <CardTitle>Watchlist</CardTitle>
-          <CardDescription>Personalize by adding tickers</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2">
-            {watchlist.map((s) => (
-              <Badge key={s} variant="secondary" className="px-3 py-1">{s}</Badge>
-            ))}
-            <Input placeholder="Add symbol…" className="w-[160px]" />
-            <Button variant="outline"><PlusCircle className="h-4 w-4 mr-1" />Add</Button>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* News list (proxied via backend) */}
       <NewsList limit={6} />
@@ -529,9 +511,6 @@ function TradePage({ authToken, authUsername, authPassword, refreshPortfolio, in
             <CardTitle>Search & Trade</CardTitle>
             <CardDescription>Search for stocks and place trades</CardDescription>
           </div>
-          {selectedStock && (
-            <Badge variant={side === "buy" ? "default" : "destructive"} className="text-base capitalize">{side}</Badge>
-          )}
         </CardHeader>
         <CardContent className="grid md:grid-cols-2 gap-6">
           <div className="flex flex-col gap-4">
@@ -788,7 +767,6 @@ export default function App() {
   const [currency, setCurrency] = useState("USD");
   const [apiPortfolio, setApiPortfolio] = useState<PortfolioResponse | null>(null);
   const [holdings, setHoldings] = useState(defaultHoldings);
-  const [watchlist, setWatchlist] = useState(watchlistDefault);
   const [dark, setDark] = useState(false);
   const [authUsername, setAuthUsername] = useState<string | null>(null);
   const [authPassword, setAuthPassword] = useState<string | null>(null);
@@ -928,8 +906,6 @@ export default function App() {
                 setHoldings={setHoldings} 
                 currency={currency} 
                 setCurrency={setCurrency} 
-                watchlist={watchlist} 
-                setWatchlist={setWatchlist} 
                 onLoadFromApi={loadPortfolioFromApi} 
                 onDownloadApi={() => downloadPortfolioCSV(apiPortfolio)} 
                 loading={portfolioLoading} 
