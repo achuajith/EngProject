@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { fetchPortfolio, downloadPortfolioCSV, login, register, portfolioBuy, portfolioSell, type PortfolioResponse, type StockSearchResult, searchStocks } from "@/lib/api";
+import { fetchPortfolio, downloadPortfolioCSV, login, register, portfolioBuy, portfolioSell, type PortfolioResponse, type StockSearchResult, searchStocks, fetchQuote, type StockQuote } from "@/lib/api";
 import { StockSearch } from "@/components/ui/stock-search";
 
 import {
@@ -40,6 +40,7 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { NewsList } from "@/components/ui/news-list";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -289,7 +290,10 @@ function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist
     URL.revokeObjectURL(url);
   }
 
-  const pieData = holdings.map((h) => ({ name: h.symbol, value: h.qty * h.last }));
+  const pieData = holdings.map((h) => ({ 
+    name: h.symbol, 
+    value: Number((h.qty * h.last).toFixed(2))
+  }));
 
   return (
     <div className="max-w-7xl mx-auto p-4 grid gap-4">
@@ -330,99 +334,84 @@ function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist
         </Card>
       </div>
 
-      <Card className="rounded-2xl">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Holdings</CardTitle>
-            <CardDescription>Your positions and performance</CardDescription>
-          </div>
-          <div className="flex gap-2 items-center">
-            <Input placeholder="Filter symbol…" className="w-[200px]" />
-            <Button variant="outline" onClick={exportCSV}><Activity className="h-4 w-4 mr-1" />Export CSV</Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {loading && <div className="mb-3 text-sm text-muted-foreground">Loading portfolio…</div>}
-          {error && <div className="mb-3 text-sm text-rose-600">{error}</div>}
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left border-b">
-                  <th className="py-2">Symbol</th>
-                  <th>Qty</th>
-                  <th>Avg</th>
-                  <th>Last</th>
-                  <th>Value</th>
-                  <th>P/L</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {holdings.map((h) => {
-                  const value = h.qty * h.last;
-                  const pl = h.qty * (h.last - h.avg);
-                  return (
-                    <tr key={h.symbol} className="border-b hover:bg-muted/30">
-                      <td className="py-2 font-medium">{h.symbol}</td>
-                      <td>{h.qty}</td>
-                      <td>{format(h.avg)}</td>
-                      <td>{format(h.last)}</td>
-                      <td>{format(value)}</td>
-                      <td className={pl >= 0 ? "text-emerald-600" : "text-rose-600"}>{format(pl)}</td>
-                      <td className="text-right">
-                        <div className="flex gap-2 justify-end">
-                          <Button variant="outline" size="sm"><PlusCircle className="h-4 w-4 mr-1" />Buy</Button>
-                          <Button variant="outline" size="sm"><MinusCircle className="h-4 w-4 mr-1" />Sell</Button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-
       <div className="grid md:grid-cols-3 gap-4">
-        <Card className="rounded-2xl">
-          <CardHeader>
-            <CardTitle>Performance</CardTitle>
-            <CardDescription>Last 30 days</CardDescription>
+        <Card className="rounded-2xl md:col-span-2">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>Holdings</CardTitle>
+              <CardDescription>Your positions and performance</CardDescription>
+            </div>
+            <div className="flex gap-2 items-center">
+              <Input placeholder="Filter symbol…" className="w-[200px]" />
+              <Button variant="outline" onClick={exportCSV}><Activity className="h-4 w-4 mr-1" />Export CSV</Button>
+            </div>
           </CardHeader>
-          <CardContent className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={samplePrices}>
-                <defs>
-                  <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="day" />
-                <YAxis />
-                <Tooltip />
-                <Area type="monotone" dataKey="price" stroke="#16a34a" fillOpacity={1} fill="url(#grad)" />
-              </AreaChart>
-            </ResponsiveContainer>
+          <CardContent>
+            {loading && <div className="mb-3 text-sm text-muted-foreground">Loading portfolio…</div>}
+            {error && <div className="mb-3 text-sm text-rose-600">{error}</div>}
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2">Symbol</th>
+                    <th>Qty</th>
+                    <th>Avg</th>
+                    <th>Last</th>
+                    <th>Value</th>
+                    <th>P/L</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {holdings.map((h) => {
+                    const value = h.qty * h.last;
+                    const pl = h.qty * (h.last - h.avg);
+                    return (
+                      <tr key={h.symbol} className="border-b hover:bg-muted/30">
+                        <td className="py-2 font-medium">{h.symbol}</td>
+                        <td>{h.qty}</td>
+                        <td>{format(h.avg)}</td>
+                        <td>{format(h.last)}</td>
+                        <td>{format(value)}</td>
+                        <td className={pl >= 0 ? "text-emerald-600" : "text-rose-600"}>{format(pl)}</td>
+                        <td className="text-right">
+                          <div className="flex gap-2 justify-end">
+                            <Button variant="outline" size="sm"><PlusCircle className="h-4 w-4 mr-1" />Buy</Button>
+                            <Button variant="outline" size="sm"><MinusCircle className="h-4 w-4 mr-1" />Sell</Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </CardContent>
         </Card>
 
-        <Card className="rounded-2xl col-span-2">
+        <Card className="rounded-2xl">
           <CardHeader>
             <CardTitle>Allocation</CardTitle>
             <CardDescription>Portfolio distribution</CardDescription>
           </CardHeader>
-          <CardContent className="h-64 flex items-center justify-center">
+          <CardContent className="h-[300px] flex items-center justify-center">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={40} outerRadius={80} paddingAngle={4}>
+                <Pie 
+                  data={pieData} 
+                  dataKey="value" 
+                  nameKey="name" 
+                  innerRadius={40} 
+                  outerRadius={80} 
+                  paddingAngle={4}
+                >
                   {pieData.map((_, i) => (
                     <Cell key={i} fill={COLORS[i % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip 
+                  formatter={(value) => format(Number(value), currency)} 
+                />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
@@ -444,6 +433,10 @@ function PortfolioPage({ holdings, setHoldings, currency, setCurrency, watchlist
           </div>
         </CardContent>
       </Card>
+
+      {/* News list (proxied via backend) */}
+      <NewsList limit={6} />
+
     </div>
   );
 }
@@ -454,10 +447,46 @@ function TradePage({ authToken, authUsername, authPassword, refreshPortfolio, in
   useEffect(() => {
     if (initialStock) setSelectedStock(initialStock)
   }, [initialStock])
-  const [quantity, setQuantity] = useState('');
-  const [side, setSide] = useState<'buy'|'sell'>('buy');
-  const [loading, setLoading] = useState(false);
-  const [confirm, setConfirm] = useState<any>(null);
+  const [quantity, setQuantity] = useState('')
+  const [side, setSide] = useState<'buy'|'sell'>('buy')
+  const [loading, setLoading] = useState(false)
+  const [loadingQuote, setLoadingQuote] = useState(false)
+  const [quote, setQuote] = useState<StockQuote | null>(null)
+  const [confirm, setConfirm] = useState<any>(null)
+
+  // Fetch quote when stock is selected
+  useEffect(() => {
+    if (!selectedStock) {
+      setQuote(null)
+      return
+    }
+
+    let mounted = true
+    async function loadQuote() {
+      setLoadingQuote(true)
+      try {
+        const q = await fetchQuote(selectedStock.symbol, authToken)
+        if (!mounted) return
+        setQuote(q)
+        // Update the selected stock's price with the live quote
+        setSelectedStock(prev => prev ? { ...prev, price: q.currentPrice } : null)
+      } catch (e) {
+        console.error('Failed to fetch quote:', e)
+        if (!mounted) return
+        setQuote(null)
+      } finally {
+        if (mounted) setLoadingQuote(false)
+      }
+    }
+    void loadQuote()
+    
+    // Refresh quote every 10 seconds while stock is selected
+    const interval = setInterval(loadQuote, 10000)
+    return () => {
+      mounted = false
+      clearInterval(interval)
+    }
+  }, [selectedStock?.symbol, authToken])
 
   const estimatedCost = useMemo(() => {
     if (!selectedStock || !quantity) return 0;
@@ -517,12 +546,24 @@ function TradePage({ authToken, authUsername, authPassword, refreshPortfolio, in
                 <CardContent className="pt-6">
                   <div className="grid gap-4">
                     <div>
-                      <h3 className="font-medium">{selectedStock.symbol} - {selectedStock.name}</h3>
-                      <p className="text-lg font-semibold mt-1">{selectedStock.price} {selectedStock.currency}</p>
-                      {selectedStock.change != null && (
-                        <p className={`text-sm ${selectedStock.change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                          {selectedStock.change >= 0 ? '+' : ''}{selectedStock.change.toFixed(2)} ({selectedStock.changePercent?.toFixed(2)}%)
-                        </p>
+                      <h3 className="font-medium">{selectedStock.displaySymbol ?? selectedStock.symbol} - {selectedStock.description}</h3>
+                      <p className="text-lg font-semibold mt-1">{selectedStock.price != null ? format(selectedStock.price, selectedStock.currency || 'USD') : '—'}</p>
+                      {loadingQuote ? (
+                        <div className="text-sm text-muted-foreground mt-1">Loading quote...</div>
+                      ) : quote ? (
+                        <div className="space-y-1 mt-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-lg font-semibold">{format(quote.currentPrice, selectedStock.currency || 'USD')}</p>
+                            <Badge variant={quote.change >= 0 ? "default" : "destructive"}>
+                              {quote.change >= 0 ? '+' : ''}{quote.percentChange.toFixed(2)}%
+                            </Badge>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            O: {format(quote.openPrice)} H: {format(quote.highPrice)} L: {format(quote.lowPrice)}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground mt-1">Quote unavailable</p>
                       )}
                     </div>
 
@@ -541,7 +582,7 @@ function TradePage({ authToken, authUsername, authPassword, refreshPortfolio, in
 
                     {quantity && (
                       <p className="text-sm text-gray-500">
-                        Total {side === 'buy' ? 'Cost' : 'Value'}: {selectedStock.price * Number(quantity)} {selectedStock.currency}
+                        Total {side === 'buy' ? 'Cost' : 'Value'}: {(selectedStock.price ?? 0) * Number(quantity)} {selectedStock.currency ?? 'USD'}
                       </p>
                     )}
 
@@ -571,51 +612,43 @@ function TradePage({ authToken, authUsername, authPassword, refreshPortfolio, in
               </Card>
             )}
           </div>
-
-          <Card className="border-dashed rounded-2xl">
-            <CardHeader>
-              <CardTitle className="text-base">Price Chart</CardTitle>
-              <CardDescription>Last 30 days (demo)</CardDescription>
-            </CardHeader>
-            <CardContent className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={samplePrices}>
-                  <XAxis dataKey="day" /><YAxis /><Tooltip />
-                  <Line type="monotone" dataKey="price" stroke="#3b82f6" dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
         </CardContent>
       </Card>
 
       <Card className="rounded-2xl">
         <CardHeader>
-          <CardTitle>Recent Orders</CardTitle>
-          <CardDescription>Demo entries</CardDescription>
+          <CardTitle>Trade History</CardTitle>
+          <CardDescription>Recent trades from your portfolio</CardDescription>
         </CardHeader>
         <CardContent>
+          {confirm && (
+            <div className={`mb-4 p-3 rounded-md ${confirm.ok ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : "bg-rose-50 text-rose-800 dark:bg-rose-950 dark:text-rose-200"}`}>
+              {confirm.msg}
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="text-left border-b">
                   <th className="py-2">Time</th>
-                  <th>Side</th>
+                  <th>Action</th>
                   <th>Symbol</th>
-                  <th>Qty</th>
-                  <th>Status</th>
+                  <th>Quantity</th>
+                  <th>Price</th>
+                  <th>Total</th>
                 </tr>
               </thead>
               <tbody>
-                {[{ t: "10:24", side: "Buy", s: "AAPL", q: 10, st: "Filled" }, { t: "10:27", side: "Sell", s: "NVDA", q: 2, st: "Filled" }, { t: "10:31", side: "Buy", s: "MSFT", q: 5, st: "Pending" }].map((o, i) => (
-                  <tr key={i} className="border-b">
-                    <td className="py-2">{o.t}</td>
-                    <td>{o.side}</td>
-                    <td>{o.s}</td>
-                    <td>{o.q}</td>
-                    <td>{o.st}</td>
+                {confirm?.ok && (
+                  <tr className="border-b bg-muted/20">
+                    <td className="py-2">{new Date().toLocaleTimeString()}</td>
+                    <td>{side.toUpperCase()}</td>
+                    <td>{selectedStock?.symbol}</td>
+                    <td>{quantity}</td>
+                    <td>{format(selectedStock?.price ?? 0, selectedStock?.currency ?? 'USD')}</td>
+                    <td>{format((selectedStock?.price ?? 0) * Number(quantity), selectedStock?.currency ?? 'USD')}</td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
@@ -936,7 +969,7 @@ export default function App() {
       )}
 
       <footer className="text-xs text-muted-foreground max-w-7xl mx-auto px-4 py-8">
-        <div className="flex items-center gap-2"><Coins className="h-3 w-3" /> Demo UI only — wire to your APIs for real data.</div>
+        <div className="flex items-center gap-2"><Coins className="h-3 w-3" />4FD3 - Final Project - OPENFx</div>
       </footer>
     </div>
   );

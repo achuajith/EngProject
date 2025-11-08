@@ -15,6 +15,7 @@ export interface TradePageProps {
 
 export function TradePage({ token, username, password, onSuccess }: TradePageProps) {
   const [selectedStock, setSelectedStock] = useState<StockSearchResult | null>(null)
+  // no frontend live-price fetch; trade uses backend quote for execution
   const [quantity, setQuantity] = useState('')
   const [isBuying, setIsBuying] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -45,6 +46,8 @@ export function TradePage({ token, username, password, onSuccess }: TradePagePro
     }
   }
 
+  // previously fetched live price here; removed in favor of server-side pricing
+
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-8">
       <div>
@@ -60,10 +63,10 @@ export function TradePage({ token, username, password, onSuccess }: TradePagePro
         <Card className="p-6 space-y-6">
           <div>
             <h2 className="text-xl font-semibold mb-2">
-              {selectedStock.symbol} - {selectedStock.name}
+              {selectedStock.symbol} - {selectedStock.description}
             </h2>
             <p className="text-lg">
-              Current Price: {selectedStock.price} {selectedStock.currency}
+              Current Price: {selectedStock.price != null ? selectedStock.price : '—'} {selectedStock.currency ?? 'USD'}
             </p>
           </div>
 
@@ -97,8 +100,8 @@ export function TradePage({ token, username, password, onSuccess }: TradePagePro
             </div>
 
             {quantity && (
-              <p className="text-sm text-gray-500">
-                Total {isBuying ? 'Cost' : 'Value'}: {selectedStock.price * Number(quantity)} {selectedStock.currency}
+                <p className="text-sm text-gray-500">
+                Total {isBuying ? 'Cost' : 'Value'}: {(selectedStock.price ?? 0) * Number(quantity)} {selectedStock.currency ?? 'USD'}
               </p>
             )}
 

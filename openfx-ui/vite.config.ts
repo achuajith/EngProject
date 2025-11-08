@@ -9,4 +9,8 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // Set dev server port to 3000 (default Vite port is 5173)
+  server: {
+    port: 3000,
+  },
 })

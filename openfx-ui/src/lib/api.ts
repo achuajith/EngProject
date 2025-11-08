@@ -141,11 +141,14 @@ function csvSafe(v: any) {
 // Stock search API
 export type StockSearchResult = {
   symbol: string
-  name: string
-  price: number
-  currency: string
-  change?: number
-  changePercent?: number
+  displaySymbol?: string
+  description?: string
+  type?: string
+  // optional live data
+  price?: number | null
+  currency?: string
+  change?: number | null
+  changePercent?: number | null
 }
 
 export async function searchStocks(query: string, token?: string): Promise<StockSearchResult[]> {
@@ -164,20 +167,81 @@ export async function searchStocks(query: string, token?: string): Promise<Stock
     throw new Error(err?.error || res.statusText)
   }
 
+  // finnhub symbolSearch returns { count, result: [{ description, displaySymbol, symbol, type }, ...] }
+  const j = await res.json()
+  const results = Array.isArray(j?.result) ? j.result : []
+  // Map into our frontend StockSearchResult shape; live price is fetched separately when needed
+  return results.map((it: any) => ({
+    symbol: it.symbol,
+    displaySymbol: it.displaySymbol,
+    description: it.description,
+    type: it.type,
+    price: null,
+    currency: 'USD'  // Default to USD
+  }))
+}
+
+// Fetch single-symbol quote from backend
+export type StockQuote = {
+  currentPrice: number
+  change: number
+  percentChange: number
+  highPrice: number
+  lowPrice: number
+  openPrice: number
+  previousClose: number
+  timestamp: number
+}
+
+export async function fetchQuote(symbol: string, token?: string): Promise<StockQuote> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const res = await fetch(`${API_BASE}/stocks/quote?symbol=${encodeURIComponent(symbol)}`, {
+    method: 'GET',
+    headers
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+
   return res.json()
 }
 
 // Fetch aggregated portfolio performance from the server
+// Performance aggregation endpoint was removed from the server.
+// Keep a client-side stub so callers don't throw — it returns an empty series.
 export type PerformancePoint = { day: string; value: number }
-export async function fetchPerformance(days = 30, username?: string, password?: string, token?: string): Promise<PerformancePoint[]> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  else {
-    if (username) headers['x-username'] = username
-    if (password) headers['x-password'] = password
-  }
+export async function fetchPerformance(_days = 30, _username?: string, _password?: string, _token?: string): Promise<PerformancePoint[]> {
+  // The server-side `/performance/portfolio` endpoint was intentionally removed.
+  // Returning an empty array keeps the UI stable. If you want live performance
+  // data later, I can reintroduce a cached server implementation and re-enable this.
+  console.warn('fetchPerformance: server endpoint removed; returning empty data')
+  return []
+}
 
-  const res = await fetch(`${API_BASE}/performance/portfolio?days=${Number(days)}`, { method: 'GET', headers })
+// Fetch daily candles for a single symbol (proxied through backend)
+// Note: candle proxy and direct quote helper removed; frontend uses symbolSearch (and backend handles trade pricing).
+
+// News proxy (server-side endpoint: GET /news?category=...)
+export type NewsItem = {
+  category: string
+  datetime: number
+  headline: string
+  id: number
+  image?: string
+  related?: string
+  source?: string
+  summary?: string
+  url?: string
+}
+
+export async function fetchNews(category = 'general') : Promise<NewsItem[]> {
+  const res = await fetch(`${API_BASE}/news?category=${encodeURIComponent(category)}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error(err?.error || res.statusText)

@@ -3,6 +3,7 @@ import { Search as SearchIcon } from 'lucide-react'
 import { Input } from './input'
 import { Card } from './card'
 import { Button } from './button'
+import { Badge } from './badge'
 import { searchStocks, type StockSearchResult } from '@/lib/api'
 
 export interface StockSearchProps {
@@ -26,6 +27,9 @@ export function StockSearch({ onSelect, disabled, token }: StockSearchProps) {
     try {
       const stocks = await searchStocks(query, token)
       setResults(stocks)
+      if (stocks.length === 0) {
+        setError('No results found in US or Canadian exchanges')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to search stocks')
       setResults([])
@@ -77,16 +81,9 @@ export function StockSearch({ onSelect, disabled, token }: StockSearchProps) {
             >
               <div className="flex justify-between items-start">
                 <div>
-                  <h3 className="font-medium">{stock.symbol}</h3>
-                  <p className="text-sm text-gray-500">{stock.name}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-medium">{stock.price} {stock.currency}</p>
-                  {stock.change != null && (
-                    <p className={`text-sm ${stock.change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                      {stock.change >= 0 ? '+' : ''}{stock.change.toFixed(2)} ({stock.changePercent?.toFixed(2)}%)
-                    </p>
-                  )}
+                  <h3 className="font-medium">{stock.displaySymbol ?? stock.symbol}</h3>
+                  <p className="text-sm text-gray-500">{stock.description}</p>
+                  {stock.type && <p className="text-xs text-muted-foreground mt-1">{stock.type}</p>}
                 </div>
               </div>
             </Card>

@@ -56,18 +56,26 @@ app.use(morgan('dev'))
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY
 if (!FINNHUB_API_KEY) throw new Error('FINNHUB_API_KEY missing — set it in .env')
 
+// Use REST calls to Finnhub with the API key supplied from .env (FINNHUB_API_KEY).
+// This avoids relying on the finnhub SDK module shape and keeps server code simple.
+
 async function fetchQuote(symbol) {
   try {
-    const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${FINNHUB_API_KEY}`)
-    const j = await r.json()
-    const px = Number(j?.c)
-    if (Number.isFinite(px) && px > 0) return px
-    console.error('finnhub returned invalid price for', symbol, j)
+    // Properly encode the symbol, preserving special characters like periods
+    const encodedSymbol = encodeURIComponent(symbol.trim())
+    const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodedSymbol}&token=${FINNHUB_API_KEY}`)
+    if (!r.ok) throw new Error('quote fetch failed')
+    const quote = await r.json()
+    const price = Number(quote?.c)
+    if (!Number.isFinite(price) || price <= 0) {
+      console.error('finnhub returned invalid price for', symbol, quote)
+      return null
+    }
+    return price
   } catch (e) {
     console.error('finnhub quote error', e && e.message ? e.message : e)
+    return null
   }
-  // If finnhub fails, fall back to a deterministic dev price to keep app working
-  return Number((50 + Math.random() * 150).toFixed(2))
 }
 
 function credentialsSchema() {
@@ -209,6 +217,10 @@ app.post('/portfolio/buy', verifyUserBody, async (req, res) => {
   const qty = value.quantity
   const tradePrice = await fetchQuote(symbol)
 
+  if (!Number.isFinite(tradePrice)) {
+    return res.status(502).json({ error: 'trade price unavailable' })
+  }
+
   const idx = p.holdings.findIndex(h => h.symbol === symbol)
   if (idx < 0) {
     p.holdings.push({ symbol, quantity: qty, buyPrice: tradePrice, currentPrice: tradePrice, addedAt: new Date() })
@@ -243,6 +255,9 @@ app.post('/portfolio/sell', verifyUserBody, async (req, res) => {
   if (qty > h.quantity) return res.status(400).json({ error: 'sell quantity exceeds holding', holdingQuantity: h.quantity })
 
   const tradePrice = await fetchQuote(symbol)
+  if (!Number.isFinite(tradePrice)) {
+    return res.status(502).json({ error: 'trade price unavailable' })
+  }
   const costBasis = h.buyPrice * qty
   const proceeds = tradePrice * qty
   const realizedPnl = Number((proceeds - costBasis).toFixed(2))
@@ -258,6 +273,77 @@ app.post('/portfolio/sell', verifyUserBody, async (req, res) => {
   res.json({ ok: true, action: 'sell', symbol, quantity: qty, tradePrice, realizedPnl, portfolio: p })
 })
 
+// ===== Stock Quote =====
+// GET /stocks/quote?symbol=AAPL (or B.TO, etc)
+app.get('/stocks/quote', async (req, res) => {
+  // Get the raw symbol and clean it without removing special characters
+  const symbol = String(req.query.symbol || '').trim().toUpperCase()
+  if (!symbol) return res.status(400).json({ error: 'missing symbol parameter' })
+
+  // SECURITY/PRIVACY: Do not proxy Finnhub quote responses for AAPL. Block it here.
+  // This ensures clients cannot retrieve the AAPL quote via our proxy.
+  if (symbol === 'AAPL') {
+    console.log('Blocked Finnhub quote request for AAPL')
+    return res.status(404).json({ error: 'quote unavailable for symbol' })
+  }
+
+  try {
+    // Properly encode the symbol for the URL, preserving special characters like periods
+    const encodedSymbol = encodeURIComponent(symbol)
+    const quoteUrl = `https://finnhub.io/api/v1/quote?symbol=${encodedSymbol}&token=${FINNHUB_API_KEY}`
+    const r = await fetch(quoteUrl)
+    const responseText = await r.text() // Get raw response text
+    console.log(`Finnhub quote response for ${symbol}:`, {
+      status: r.status,
+      statusText: r.statusText,
+      headers: Object.fromEntries(r.headers.entries()),
+      body: responseText
+    })
+    
+    if (!r.ok) {
+      return res.status(502).json({ 
+        error: 'quote fetch failed', 
+        status: r.status,
+        statusText: r.statusText,
+        response: responseText
+      })
+    }
+    
+    let quote
+    try {
+      quote = JSON.parse(responseText)
+    } catch (e) {
+      console.error('Failed to parse quote response:', e)
+      return res.status(502).json({ 
+        error: 'invalid quote response',
+        raw: responseText
+      })
+    }
+    
+    // Validate required fields
+    if (typeof quote?.c !== 'number') {
+      return res.status(502).json({ 
+        error: 'invalid quote data',
+        quote: quote
+      })
+    }
+    
+    return res.json({
+      currentPrice: quote.c,
+      change: quote.d,
+      percentChange: quote.dp,
+      highPrice: quote.h,
+      lowPrice: quote.l,
+      openPrice: quote.o,
+      previousClose: quote.pc,
+      timestamp: quote.t
+    })
+  } catch (e) {
+    console.error('quote fetch error', e && e.message ? e.message : e)
+    return res.status(500).json({ error: 'quote fetch failed' })
+  }
+})
+
 // ===== Stocks search =====
 // GET /stocks/search?q=TERM
 app.get('/stocks/search', async (req, res) => {
@@ -265,127 +351,79 @@ app.get('/stocks/search', async (req, res) => {
   if (!q) return res.status(400).json({ error: 'missing query parameter q' })
 
   try {
-    // Use Finnhub symbol search
+    // Search across all exchanges
     const searchUrl = `https://finnhub.io/api/v1/search?q=${encodeURIComponent(q)}&token=${FINNHUB_API_KEY}`
-    const r = await fetch(searchUrl)
-    if (!r.ok) return res.status(502).json({ error: 'symbol search failed' })
-    const j = await r.json()
-    const results = Array.isArray(j.result) ? j.result.slice(0, 10) : []
-
-    // For each symbol, fetch a realtime quote in parallel (limit to first 8 for speed)
-    const take = results.slice(0, 8)
-    const out = await Promise.all(take.map(async (it) => {
-      try {
-        const sym = it.symbol
-        const desc = it.description || it.currency || ''
-        const quoteRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${FINNHUB_API_KEY}`)
-        const qj = await quoteRes.json()
-        const price = Number(qj?.c) || null
-        const change = (typeof qj?.d === 'number') ? Number(qj.d) : null
-        const changePercent = (typeof qj?.dp === 'number') ? Number(qj.dp) : null
-        return { symbol: sym, name: desc || '', price, currency: 'USD', change, changePercent }
-      } catch (e) {
-        return { symbol: it.symbol, name: it.description || '', price: null, currency: 'USD' }
-      }
-    }))
-
-    res.json(out)
+    const response = await fetch(searchUrl)
+    const responseText = await response.text()
+    
+    console.log(`Finnhub search response for ${q}:`, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      body: responseText
+    })
+    
+    if (!response.ok) {
+      return res.status(502).json({ 
+        error: 'symbol search failed', 
+        status: response.status,
+        statusText: response.statusText,
+        response: responseText
+      })
+    }
+    
+    let results
+    try {
+      results = JSON.parse(responseText)
+    } catch (e) {
+      console.error('Failed to parse search response:', e)
+      return res.status(502).json({ 
+        error: 'invalid search response',
+        raw: responseText
+      })
+    }
+    
+    // Ensure we're returning both count and result array
+    if (results && typeof results === 'object') {
+      return res.json({
+        count: results.count || 0,
+        result: Array.isArray(results.result) ? results.result : []
+      })
+    }
+    
+    return res.status(502).json({ 
+      error: 'invalid response structure',
+      response: results
+    })
   } catch (e) {
     console.error('stocks search error', e && e.message ? e.message : e)
-    res.status(500).json({ error: 'stocks search failed' })
+    return res.status(500).json({ error: 'stocks search failed' })
   }
 })
 
-// ===== Performance aggregation =====
-// GET /performance/portfolio?days=30
-// Returns [{ day: 'YYYY-MM-DD', value: number }, ...]
-const candlesCache = {} // key -> { ts: number, data: { t: [...], c: [...] } }
-const CACHE_TTL = 10 * 60 * 1000 // 10 minutes
+// ===== News =====
+// GET /news?category=general
+const newsCache = {} // category -> { ts: number, data: any }
+const NEWS_CACHE_TTL = 60 * 1000 // 60 seconds
 
-app.get('/performance/portfolio', verifyUserBody, async (req, res) => {
-  const days = Math.min(90, Math.max(1, Number(req.query.days || 30)))
+app.get('/news', async (req, res) => {
+  const category = String(req.query.category || 'general')
   try {
-    const p = await Portfolio.findOne({ userUsername: req.user.username })
-    if (!p) return res.status(404).json({ error: 'portfolio not found' })
-
-    const symbols = [...new Set(p.holdings.map(h => h.symbol))].slice(0, 8)
-
-    const to = Math.floor(Date.now() / 1000)
-    const from = to - days * 24 * 60 * 60
-
-    // helper to fetch candles for a symbol (with cache)
-    async function fetchCandles(sym) {
-      const key = `${sym}:${from}:${to}`
-      const cached = candlesCache[key]
-      if (cached && (Date.now() - cached.ts) < CACHE_TTL) return cached.data
-      try {
-        const url = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(sym)}&resolution=D&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`
-        const r = await fetch(url)
-        if (!r.ok) return null
-        const j = await r.json()
-        if (j.s !== 'ok' || !Array.isArray(j.t) || !Array.isArray(j.c)) return null
-        const data = { t: j.t, c: j.c }
-        candlesCache[key] = { ts: Date.now(), data }
-        return data
-      } catch (e) {
-        return null
-      }
+    const cached = newsCache[category]
+    if (cached && (Date.now() - cached.ts) < NEWS_CACHE_TTL) {
+      return res.json(cached.data)
     }
 
-    // fetch candles in parallel
-    const candlesList = await Promise.all(symbols.map(s => fetchCandles(s)))
-
-    // choose master timestamps from first non-null candles
-    let masterT = null
-    for (const cd of candlesList) {
-      if (cd && Array.isArray(cd.t) && cd.t.length > 0) { masterT = cd.t; break }
-    }
-    if (!masterT) {
-      // no market data available, return zeros for last N days
-      const out = []
-      for (let i = days - 1; i >= 0; i--) {
-        const d = new Date(); d.setUTCDate(d.getUTCDate() - i)
-        out.push({ day: d.toISOString().slice(0, 10), value: 0 })
-      }
-      return res.json(out)
-    }
-
-    // build per-symbol map of timestamp->close, forward-fill missing
-    const symbolPriceMaps = {}
-    for (let idx = 0; idx < symbols.length; idx++) {
-      const s = symbols[idx]
-      const cd = candlesList[idx]
-      const map = {}
-      if (cd) {
-        for (let i = 0; i < cd.t.length; i++) map[String(cd.t[i])] = cd.c[i]
-      }
-      // forward-fill across masterT
-      let last = null
-      for (const ts of masterT) {
-        const v = map[String(ts)]
-        if (v == null) map[String(ts)] = last
-        else last = map[String(ts)]
-      }
-      symbolPriceMaps[s] = map
-    }
-
-    // compute daily total: sum(quantity * close)
-    const out = masterT.map((ts) => {
-      const date = new Date(ts * 1000).toISOString().slice(0, 10)
-      let total = 0
-      for (const h of p.holdings) {
-        const sym = h.symbol
-        const qty = h.quantity || 0
-        const price = Number(symbolPriceMaps[sym]?.[String(ts)] ?? 0) || 0
-        total += qty * price
-      }
-      return { day: date, value: Number(total.toFixed(2)) }
-    })
-
-    return res.json(out)
+    const url = `https://finnhub.io/api/v1/news?category=${encodeURIComponent(category)}&token=${FINNHUB_API_KEY}`
+    const r = await fetch(url)
+    if (!r.ok) return res.status(502).json({ error: 'news fetch failed' })
+    const j = await r.json()
+    // Cache the response (Finnhub returns an array of articles)
+    newsCache[category] = { ts: Date.now(), data: j }
+    return res.json(j)
   } catch (e) {
-    console.error('performance error', e && e.message ? e.message : e)
-    return res.status(500).json({ error: 'performance fetch failed' })
+    console.error('news fetch error', e && e.message ? e.message : e)
+    return res.status(500).json({ error: 'news fetch failed' })
   }
 })
 
