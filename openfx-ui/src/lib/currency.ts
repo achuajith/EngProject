@@ -25,30 +25,3 @@ export function extractCoreRates(resp: OpenExchangeRatesResponse) {
   if (!cad || !eur) throw new Error('CAD or EUR rate missing in response');
   return { USD: usd, CAD: cad, EUR: eur };
 }
-
-// Convert using a rates object that contains USD, CAD, EUR with USD as base (USD = 1)
-export function convertCurrency(amount: number, from: string, to: string, rates: { USD: number; CAD: number; EUR: number }) {
-  if (!(from in rates) || !(to in rates)) throw new Error('Currency not supported');
-  // Since USD is base, if from is USD -> multiply by target
-  if (from === 'USD') return amount * rates[to as keyof typeof rates];
-  // Convert from source to USD first
-  const amountInUsd = amount / rates[from as keyof typeof rates];
-  // Then USD to target
-  return amountInUsd * rates[to as keyof typeof rates];
-}
-
-// Helper to format a number in target currency using Intl.
-export function formatCurrency(amount: number, currency: string) {
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
-  } catch {
-    return amount.toFixed(2) + ' ' + currency;
-  }
-}
-
-// High-level convenience: given raw API response and desired display currency, return formatted amount
-export function convertAndFormat(amount: number, from: string, to: string, resp: OpenExchangeRatesResponse) {
-  const core = extractCoreRates(resp);
-  const converted = convertCurrency(amount, from, to, core);
-  return formatCurrency(converted, to);
-}

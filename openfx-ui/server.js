@@ -198,11 +198,6 @@ app.get('/admin/users', verifyUserBody, ensureAdmin, async (req, res) => {
   const users = await User.find({}, { email: 1, fullname: 1, username: 1, roles: 1, createdAt: 1 }).sort({ createdAt: -1 }).lean()
   res.json({ users })
 })
-// Back-compat/alias: singular path
-app.get('/admin/user', verifyUserBody, ensureAdmin, async (req, res) => {
-  const users = await User.find({}, { email: 1, fullname: 1, username: 1, roles: 1, createdAt: 1 }).sort({ createdAt: -1 }).lean()
-  res.json({ users, note: 'alias endpoint; prefer /admin/users' })
-})
 
 // Create user (admin)
 app.post('/admin/users', verifyUserBody, ensureAdmin, async (req, res) => {
@@ -222,25 +217,6 @@ app.post('/admin/users', verifyUserBody, ensureAdmin, async (req, res) => {
   const user = await User.create({ email: value.email, passwordHash, fullname: value.fullname, username: value.username, roles: value.roles })
   await Portfolio.create({ userUsername: user.username, holdings: [] })
   return res.json({ user: { email: user.email, fullname: user.fullname, username: user.username, roles: user.roles } })
-})
-// Back-compat/alias: singular path
-app.post('/admin/user', verifyUserBody, ensureAdmin, async (req, res) => {
-  const schema = Joi.object({
-    email: Joi.string().email().required(),
-    fullname: Joi.string().min(2).max(100).required(),
-    username: Joi.string().alphanum().min(3).max(30).required(),
-    password: Joi.string().min(8).max(200).required(),
-    roles: Joi.array().items(Joi.string()).default(['user'])
-  })
-  const { error, value } = schema.validate(req.body)
-  if (error) return res.status(400).json({ error: error.message })
-  const exists = await User.findOne({ $or: [{ email: value.email }, { username: value.username }] })
-  if (exists) return res.status(409).json({ error: 'email or username exists' })
-  let passwordHash
-  try { passwordHash = await hashPassword(value.password) } catch (e) { return res.status(500).json({ error: 'failed to process password' }) }
-  const user = await User.create({ email: value.email, passwordHash, fullname: value.fullname, username: value.username, roles: value.roles })
-  await Portfolio.create({ userUsername: user.username, holdings: [] })
-  return res.json({ user: { email: user.email, fullname: user.fullname, username: user.username, roles: user.roles }, note: 'alias endpoint; prefer /admin/users' })
 })
 
 // Delete user + portfolio
