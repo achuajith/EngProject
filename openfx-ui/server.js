@@ -128,6 +128,16 @@ async function verifyUserBody(req, res, next) {
   next()
 }
 
+function ensureAdmin(req, res, next) {
+  try {
+    const roles = Array.isArray(req.user?.roles) ? req.user.roles : []
+    if (!roles.includes('admin')) return res.status(403).json({ error: 'admin only' })
+    return next()
+  } catch (e) {
+    return res.status(403).json({ error: 'admin only' })
+  }
+}
+
 // ===== Users =====
 const registerSchema = Joi.object({
   email: Joi.string().email().required(),
@@ -173,6 +183,118 @@ app.post('/users/login', async (req, res) => {
   res.json({ user: safeUser, token })
 })
 
+// ===== Basic Health / Root =====
+app.get('/', (req, res) => {
+  res.json({ ok: true, service: 'openfx-api', uptime: process.uptime(), timestamp: Date.now() })
+})
+app.get('/health', (req, res) => {
+  res.json({ status: 'healthy', uptime: process.uptime(), timestamp: Date.now() })
+})
+
+// ===== Admin APIs =====
+// All admin endpoints require a valid user and admin role
+// List users
+app.get('/admin/users', verifyUserBody, ensureAdmin, async (req, res) => {
+  const users = await User.find({}, { email: 1, fullname: 1, username: 1, roles: 1, createdAt: 1 }).sort({ createdAt: -1 }).lean()
+  res.json({ users })
+})
+// Back-compat/alias: singular path
+app.get('/admin/user', verifyUserBody, ensureAdmin, async (req, res) => {
+  const users = await User.find({}, { email: 1, fullname: 1, username: 1, roles: 1, createdAt: 1 }).sort({ createdAt: -1 }).lean()
+  res.json({ users, note: 'alias endpoint; prefer /admin/users' })
+})
+
+// Create user (admin)
+app.post('/admin/users', verifyUserBody, ensureAdmin, async (req, res) => {
+  const schema = Joi.object({
+    email: Joi.string().email().required(),
+    fullname: Joi.string().min(2).max(100).required(),
+    username: Joi.string().alphanum().min(3).max(30).required(),
+    password: Joi.string().min(8).max(200).required(),
+    roles: Joi.array().items(Joi.string()).default(['user'])
+  })
+  const { error, value } = schema.validate(req.body)
+  if (error) return res.status(400).json({ error: error.message })
+  const exists = await User.findOne({ $or: [{ email: value.email }, { username: value.username }] })
+  if (exists) return res.status(409).json({ error: 'email or username exists' })
+  let passwordHash
+  try { passwordHash = await hashPassword(value.password) } catch (e) { return res.status(500).json({ error: 'failed to process password' }) }
+  const user = await User.create({ email: value.email, passwordHash, fullname: value.fullname, username: value.username, roles: value.roles })
+  await Portfolio.create({ userUsername: user.username, holdings: [] })
+  return res.json({ user: { email: user.email, fullname: user.fullname, username: user.username, roles: user.roles } })
+})
+// Back-compat/alias: singular path
+app.post('/admin/user', verifyUserBody, ensureAdmin, async (req, res) => {
+  const schema = Joi.object({
+    email: Joi.string().email().required(),
+    fullname: Joi.string().min(2).max(100).required(),
+    username: Joi.string().alphanum().min(3).max(30).required(),
+    password: Joi.string().min(8).max(200).required(),
+    roles: Joi.array().items(Joi.string()).default(['user'])
+  })
+  const { error, value } = schema.validate(req.body)
+  if (error) return res.status(400).json({ error: error.message })
+  const exists = await User.findOne({ $or: [{ email: value.email }, { username: value.username }] })
+  if (exists) return res.status(409).json({ error: 'email or username exists' })
+  let passwordHash
+  try { passwordHash = await hashPassword(value.password) } catch (e) { return res.status(500).json({ error: 'failed to process password' }) }
+  const user = await User.create({ email: value.email, passwordHash, fullname: value.fullname, username: value.username, roles: value.roles })
+  await Portfolio.create({ userUsername: user.username, holdings: [] })
+  return res.json({ user: { email: user.email, fullname: user.fullname, username: user.username, roles: user.roles }, note: 'alias endpoint; prefer /admin/users' })
+})
+
+// Delete user + portfolio
+app.delete('/admin/users/:username', verifyUserBody, ensureAdmin, async (req, res) => {
+  const username = String(req.params.username || '').trim()
+  if (!username) return res.status(400).json({ error: 'missing username' })
+  await Portfolio.deleteOne({ userUsername: username })
+  const r = await User.deleteOne({ username })
+  if (r.deletedCount === 0) return res.status(404).json({ error: 'user not found' })
+  return res.json({ ok: true })
+})
+
+// Get a user's portfolio
+app.get('/admin/users/:username/portfolio', verifyUserBody, ensureAdmin, async (req, res) => {
+  const username = String(req.params.username || '').trim()
+  if (!username) return res.status(400).json({ error: 'missing username' })
+  const p = await Portfolio.findOne({ userUsername: username }).lean()
+  if (!p) return res.status(404).json({ error: 'portfolio not found' })
+  return res.json({ holdings: p.holdings || [] })
+})
+
+// Upsert holding for a user (add or modify symbol)
+app.post('/admin/users/:username/holdings', verifyUserBody, ensureAdmin, async (req, res) => {
+  const username = String(req.params.username || '').trim()
+  if (!username) return res.status(400).json({ error: 'missing username' })
+  const schema = Joi.object({ symbol: Joi.string().uppercase().trim().required(), quantity: Joi.number().min(0).required(), buyPrice: Joi.number().min(0).required() })
+  const { error, value } = schema.validate(req.body)
+  if (error) return res.status(400).json({ error: error.message })
+  const p = await Portfolio.findOne({ userUsername: username })
+  if (!p) return res.status(404).json({ error: 'portfolio not found' })
+  const idx = p.holdings.findIndex(h => h.symbol === value.symbol)
+  if (idx < 0) {
+    p.holdings.push({ symbol: value.symbol, quantity: value.quantity, buyPrice: value.buyPrice, currentPrice: value.buyPrice, addedAt: new Date() })
+  } else {
+    p.holdings[idx].quantity = value.quantity
+    p.holdings[idx].buyPrice = value.buyPrice
+  }
+  await p.save()
+  return res.json({ ok: true, holdings: p.holdings })
+})
+
+// Delete a holding for a user
+app.delete('/admin/users/:username/holdings/:symbol', verifyUserBody, ensureAdmin, async (req, res) => {
+  const username = String(req.params.username || '').trim()
+  const symbol = String(req.params.symbol || '').trim().toUpperCase()
+  if (!username || !symbol) return res.status(400).json({ error: 'missing parameters' })
+  const p = await Portfolio.findOne({ userUsername: username })
+  if (!p) return res.status(404).json({ error: 'portfolio not found' })
+  const before = p.holdings.length
+  p.holdings = p.holdings.filter(h => h.symbol !== symbol)
+  await p.save()
+  return res.json({ ok: true, removed: before - p.holdings.length, holdings: p.holdings })
+})
+
 // ===== Portfolio =====
 // /portfolio/all: fetch live quotes, update DB, return latest with totals
 app.post('/portfolio/all', verifyUserBody, async (req, res) => {
@@ -201,6 +323,27 @@ app.post('/portfolio/all', verifyUserBody, async (req, res) => {
   const pnl = Number((totalCurrent - totalInvested).toFixed(2))
   const pnlPercent = totalInvested > 0 ? Number(((pnl / totalInvested) * 100).toFixed(2)) : null
 
+  res.json({ username: req.user.username, totals: { totalInvested, totalCurrent, pnl, pnlPercent }, holdings })
+})
+
+// Optional GET variant for easier manual testing (requires token auth)
+app.get('/portfolio/all', verifyUserBody, async (req, res) => {
+  const p = await Portfolio.findOne({ userUsername: req.user.username })
+  if (!p) return res.status(404).json({ error: 'portfolio not found' })
+  // No refresh of quotes here (to keep it lightweight); just return last stored values
+  const holdings = p.holdings.map(h => ({
+    symbol: h.symbol,
+    quantity: h.quantity,
+    buyPrice: h.buyPrice,
+    currentPrice: h.currentPrice,
+    gain: Number((h.currentPrice - h.buyPrice).toFixed(2)),
+    gainPercent: h.buyPrice > 0 ? Number((((h.currentPrice - h.buyPrice) / h.buyPrice) * 100).toFixed(2)) : null,
+    addedAt: h.addedAt
+  }))
+  const totalInvested = p.holdings.reduce((s, h) => s + h.buyPrice * h.quantity, 0)
+  const totalCurrent = p.holdings.reduce((s, h) => s + h.currentPrice * h.quantity, 0)
+  const pnl = Number((totalCurrent - totalInvested).toFixed(2))
+  const pnlPercent = totalInvested > 0 ? Number(((pnl / totalInvested) * 100).toFixed(2)) : null
   res.json({ username: req.user.username, totals: { totalInvested, totalCurrent, pnl, pnlPercent }, holdings })
 })
 
@@ -280,13 +423,6 @@ app.get('/stocks/quote', async (req, res) => {
   const symbol = String(req.query.symbol || '').trim().toUpperCase()
   if (!symbol) return res.status(400).json({ error: 'missing symbol parameter' })
 
-  // SECURITY/PRIVACY: Do not proxy Finnhub quote responses for AAPL. Block it here.
-  // This ensures clients cannot retrieve the AAPL quote via our proxy.
-  if (symbol === 'AAPL') {
-    console.log('Blocked Finnhub quote request for AAPL')
-    return res.status(404).json({ error: 'quote unavailable for symbol' })
-  }
-
   try {
     // Properly encode the symbol for the URL, preserving special characters like periods
     const encodedSymbol = encodeURIComponent(symbol)
@@ -335,6 +471,31 @@ app.get('/stocks/quote', async (req, res) => {
   } catch (e) {
     console.error('quote fetch error', e && e.message ? e.message : e)
     return res.status(500).json({ error: 'quote fetch failed' })
+  }
+})
+
+// ===== Company Profile =====
+// GET /stocks/profile?symbol=AAPL
+app.get('/stocks/profile', async (req, res) => {
+  const symbol = String(req.query.symbol || '').trim().toUpperCase()
+  if (!symbol) return res.status(400).json({ error: 'missing symbol parameter' })
+
+  try {
+    const encodedSymbol = encodeURIComponent(symbol)
+    const url = `https://finnhub.io/api/v1/stock/profile2?symbol=${encodedSymbol}&token=${FINNHUB_API_KEY}`
+    const r = await fetch(url)
+    const text = await r.text()
+    if (!r.ok) return res.status(502).json({ error: 'profile fetch failed', status: r.status, statusText: r.statusText, response: text })
+    let json
+    try { json = JSON.parse(text) } catch (e) { return res.status(502).json({ error: 'invalid profile response', raw: text }) }
+    // basic shape validation: expect at least ticker/name keys or return empty
+    if (!json || typeof json !== 'object' || (!json.ticker && !json.name)) {
+      return res.json({})
+    }
+    return res.json(json)
+  } catch (e) {
+    console.error('profile fetch error', e && e.message ? e.message : e)
+    return res.status(500).json({ error: 'profile fetch failed' })
   }
 })
 
@@ -414,6 +575,11 @@ app.get('/news', async (req, res) => {
 })
 
 // ===== Start =====
+// Fallback 404 JSON (after all routes)
+app.use((req, res) => {
+  res.status(404).json({ error: 'not found', path: req.path })
+})
+
 app.listen(PORT, () => {
   console.log(`API on http://localhost:${PORT}`)
 })

@@ -212,6 +212,35 @@ export async function fetchQuote(symbol: string, token?: string): Promise<StockQ
   return res.json()
 }
 
+// Fetch company profile (proxied backend endpoint)
+export type CompanyProfile = {
+  country?: string
+  currency?: string
+  estimateCurrency?: string
+  exchange?: string
+  finnhubIndustry?: string
+  ipo?: string
+  logo?: string
+  marketCapitalization?: number
+  name?: string
+  phone?: string
+  shareOutstanding?: number
+  ticker?: string
+  weburl?: string
+}
+
+export async function fetchProfile(symbol: string, token?: string): Promise<CompanyProfile | null> {
+  const headers: Record<string,string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const res = await fetch(`${API_BASE}/stocks/profile?symbol=${encodeURIComponent(symbol)}`, { method: 'GET', headers })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+  const j = await res.json().catch(() => null)
+  return j && Object.keys(j).length ? j : null
+}
+
 // Fetch aggregated portfolio performance from the server
 // Performance aggregation endpoint was removed from the server.
 // Keep a client-side stub so callers don't throw — it returns an empty series.
@@ -247,4 +276,63 @@ export async function fetchNews(category = 'general') : Promise<NewsItem[]> {
     throw new Error(err?.error || res.statusText)
   }
   return res.json()
+}
+
+// ===== Admin APIs =====
+export type AdminUser = { email: string; fullname: string; username: string; roles: string[] }
+
+export async function adminListUsers(token: string): Promise<AdminUser[]> {
+  const res = await fetch(`${API_BASE}/admin/users`, { method: 'GET', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+  const j = await res.json()
+  return Array.isArray(j?.users) ? j.users : []
+}
+
+export async function adminCreateUser(payload: { email: string; fullname: string; username: string; password: string; roles?: string[] }, token: string): Promise<AdminUser> {
+  const res = await fetch(`${API_BASE}/admin/users`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(payload) })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+  const j = await res.json()
+  return j?.user
+}
+
+export async function adminDeleteUser(username: string, token: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+}
+
+export async function adminGetPortfolio(username: string, token: string): Promise<Holding[]> {
+  const res = await fetch(`${API_BASE}/admin/users/${encodeURIComponent(username)}/portfolio`, { method: 'GET', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+  const j = await res.json()
+  const h = Array.isArray(j?.holdings) ? j.holdings : []
+  // Map server holding shape to front-end Holding type if needed
+  return h.map((it: any) => ({ symbol: it.symbol, quantity: it.quantity, buyPrice: it.buyPrice, currentPrice: it.currentPrice }))
+}
+
+export async function adminUpsertHolding(username: string, payload: { symbol: string; quantity: number; buyPrice: number }, token: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/admin/users/${encodeURIComponent(username)}/holdings`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(payload) })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+}
+
+export async function adminDeleteHolding(username: string, symbol: string, token: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/admin/users/${encodeURIComponent(username)}/holdings/${encodeURIComponent(symbol)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
 }
