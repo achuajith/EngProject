@@ -121,10 +121,8 @@ export function TradePage({ authToken, authUsername, authPassword, refreshPortfo
     <div className="max-w-5xl mx-auto p-4 grid gap-4">
       <Card className="rounded-2xl">
         <CardHeader className="flex items-center justify-between">
-          <div>
             <CardTitle>Search & Trade</CardTitle>
             <CardDescription>Search for stocks and place trades</CardDescription>
-          </div>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-6">
@@ -241,7 +239,7 @@ export function TradePage({ authToken, authUsername, authPassword, refreshPortfo
       </Card>
 
       <Card className="rounded-2xl">
-        <CardHeader>
+        <CardHeader className="flex items-center justify-between">
           <CardTitle>Trade History</CardTitle>
           <CardDescription>Recent trades from your portfolio</CardDescription>
         </CardHeader>
