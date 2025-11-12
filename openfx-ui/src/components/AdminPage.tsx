@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { adminListUsers, adminCreateUser, adminDeleteUser, adminGetPortfolio, adminUpsertHolding, adminDeleteHolding } from "@/lib/api";
 
 export function AdminPage({ token }: { token: string }) {
   const [users, setUsers] = useState<Array<{ email: string; fullname: string; username: string; roles: string[] }>>([])
@@ -17,7 +18,6 @@ export function AdminPage({ token }: { token: string }) {
   async function loadUsers() {
     setLoading(true); setErr(null)
     try {
-      const { adminListUsers } = await import('@/lib/api')
       const u = await adminListUsers(token)
       setUsers(u)
     } catch (e: any) { setErr(e?.message || String(e)) } finally { setLoading(false) }
@@ -27,7 +27,6 @@ export function AdminPage({ token }: { token: string }) {
   async function createUser() {
     setErr(null)
     try {
-      const { adminCreateUser } = await import('@/lib/api')
       const roles = form.admin ? ['admin'] : ['user']
       await adminCreateUser({ email: form.email.trim(), fullname: form.fullname.trim(), username: form.username.trim(), password: form.password, roles }, token)
       setForm({ email: '', fullname: '', username: '', password: '', admin: false })
@@ -38,7 +37,6 @@ export function AdminPage({ token }: { token: string }) {
   async function deleteUser(username: string) {
     if (!confirm(`Delete user ${username}?`)) return
     try {
-      const { adminDeleteUser } = await import('@/lib/api')
       await adminDeleteUser(username, token)
       if (selected === username) { setSelected(null); setHoldings([]) }
       await loadUsers()
@@ -48,7 +46,6 @@ export function AdminPage({ token }: { token: string }) {
   async function loadPortfolio(username: string) {
     setSelected(username)
     try {
-      const { adminGetPortfolio } = await import('@/lib/api')
       const ph = await adminGetPortfolio(username, token)
       setHoldings(ph as any)
     } catch (e: any) { setErr(e?.message || String(e)) }
@@ -57,7 +54,6 @@ export function AdminPage({ token }: { token: string }) {
   async function upsertHolding() {
     if (!selected) return
     try {
-      const { adminUpsertHolding } = await import('@/lib/api')
       await adminUpsertHolding(selected, { symbol: hForm.symbol.trim().toUpperCase(), quantity: Number(hForm.quantity), buyPrice: Number(hForm.buyPrice) }, token)
       setHForm({ symbol: '', quantity: 0, buyPrice: 0 })
       await loadPortfolio(selected)
@@ -67,7 +63,6 @@ export function AdminPage({ token }: { token: string }) {
   async function removeHolding(symbol: string) {
     if (!selected) return
     try {
-      const { adminDeleteHolding } = await import('@/lib/api')
       await adminDeleteHolding(selected, symbol, token)
       await loadPortfolio(selected)
     } catch (e: any) { setErr(e?.message || String(e)) }

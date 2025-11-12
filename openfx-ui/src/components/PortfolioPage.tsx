@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
+import { fetchExchangeRates, extractCoreRates } from "@/lib/currency";
 import {
   PieChart,
   Pie,
@@ -34,13 +35,11 @@ export function PortfolioPage({ holdings, currency, setCurrency, onLoadFromApi, 
   // Currency conversion logic
   const [rates, setRates] = useState<{ USD: number; CAD: number; EUR: number }>({ USD: 1, CAD: 1, EUR: 1 });
   useEffect(() => {
-    import("@/lib/currency").then(({ fetchExchangeRates, extractCoreRates }) => {
-      const envAny = (import.meta as any);
-      const key = envAny?.env?.VITE_OpenExchangeRate_API_KEY;
-      fetchExchangeRates(key)
-        .then((resp) => setRates(extractCoreRates(resp)))
-        .catch(() => setRates({ USD: 1, CAD: 1.4, EUR: 0.86 }));
-    });
+    const envAny = (import.meta as any);
+    const key = envAny?.env?.VITE_OpenExchangeRate_API_KEY;
+    fetchExchangeRates(key)
+      .then((resp) => setRates(extractCoreRates(resp)))
+      .catch(() => setRates({ USD: 1, CAD: 1.4, EUR: 0.86 }));
   }, []);
   function formatConverted(n: number, cur: string) {
     const get = (c: string) => (rates as any)[c];
