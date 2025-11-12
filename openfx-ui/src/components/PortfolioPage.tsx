@@ -31,19 +31,18 @@ export function PortfolioPage({ holdings, currency, setCurrency, onLoadFromApi, 
     return { mv, cost, pl: mv - cost, plPct: cost ? ((mv - cost) / cost) * 100 : 0 };
   }, [holdings]);
 
-  // Currency conversion logic (local to PortfolioPage)
+  // Currency conversion logic
   const [rates, setRates] = useState<{ USD: number; CAD: number; EUR: number }>({ USD: 1, CAD: 1, EUR: 1 });
   useEffect(() => {
     import("@/lib/currency").then(({ fetchExchangeRates, extractCoreRates }) => {
       const envAny = (import.meta as any);
-      const key = envAny?.env?.VITE_OpenExchangeRate_API_KEY || "ca2e6e010a704e71a81b1594664ecf27";
+      const key = envAny?.env?.VITE_OpenExchangeRate_API_KEY;
       fetchExchangeRates(key)
         .then((resp) => setRates(extractCoreRates(resp)))
         .catch(() => setRates({ USD: 1, CAD: 1.4, EUR: 0.86 }));
     });
   }, []);
   function formatConverted(n: number, cur: string) {
-    // compute via USD base math using loaded rates
     const get = (c: string) => (rates as any)[c];
     try {
       if (!(get('USD') && get(cur))) throw new Error('missing rates');
@@ -216,8 +215,6 @@ export function PortfolioPage({ holdings, currency, setCurrency, onLoadFromApi, 
           </CardContent>
         </Card>
       </div>
-
-      {/* News list (proxied via backend) */}
       <NewsList limit={6} />
     </div>
   );

@@ -43,7 +43,6 @@ export default function App() {
   const [apiPortfolio, setApiPortfolio] = useState<PortfolioResponse | null>(null);
   const [holdings, setHoldings] = useState(defaultHoldings);
   const [dark, setDark] = useState(() => {
-    // Initialize dark mode from localStorage or system preference
     const saved = localStorage.getItem('darkMode');
     if (saved !== null) return saved === 'true';
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -57,7 +56,6 @@ export default function App() {
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const [tradeStock, setTradeStock] = useState(null);
 
-  // Persist dark mode to localStorage
   useEffect(() => {
     localStorage.setItem('darkMode', String(dark));
   }, [dark]);
@@ -77,7 +75,6 @@ export default function App() {
         setAuthToken(token)
         localStorage.setItem('authToken', token)
       } else {
-        // fallback: store creds (note: storing hashes in localStorage has security implications)
         setAuthUsername(username)
         setAuthPassword(password)
         localStorage.setItem('authUsername', username)
@@ -85,7 +82,6 @@ export default function App() {
 
   setAuthed(true)
       setRoute('portfolio')
-      // load portfolio using token if available — pass token explicitly to avoid race with state updates
       if (token) {
         await loadPortfolioFromApi(undefined, undefined, token)
       } else {
@@ -113,7 +109,6 @@ export default function App() {
 
   const showAdmin = role === "admin";
 
-  // Move function definition here so it can access state
   const loadPortfolioFromApi = async (usernameArg?: string | null, passwordArg?: string | null, tokenArg?: string | null) => {
     const username = usernameArg ?? authUsername ?? '';
     const password = passwordArg ?? authPassword ?? '';
@@ -124,7 +119,6 @@ export default function App() {
     try {
       const p = await fetchPortfolio(username, password, token)
       setApiPortfolio(p)
-      // Map API holdings -> UI holdings shape
       const mapped = p.holdings.map((h) => ({ symbol: h.symbol, qty: h.quantity, avg: h.buyPrice, last: h.currentPrice }))
       setHoldings(mapped)
     } catch (e: any) {

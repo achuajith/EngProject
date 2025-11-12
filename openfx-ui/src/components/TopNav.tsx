@@ -17,12 +17,12 @@ export function TopNav({ route, setRoute, role, setRole, isAuthed, onLogout, onL
     const root = document.documentElement;
     if (dark) {
       root.classList.add("dark");
-      document.body.style.backgroundColor = 'rgb(15, 23, 42)'; // slate-900
-      document.body.style.color = 'rgb(248, 250, 252)'; // slate-50
+      document.body.style.backgroundColor = 'rgb(15, 23, 42)'; 
+      document.body.style.color = 'rgb(248, 250, 252)'; 
     } else {
       root.classList.remove("dark");
-      document.body.style.backgroundColor = 'rgb(248, 250, 252)'; // slate-50
-      document.body.style.color = 'rgb(15, 23, 42)'; // slate-900
+      document.body.style.backgroundColor = 'rgb(248, 250, 252)'; 
+      document.body.style.color = 'rgb(15, 23, 42)';
     }
   }, [dark]);
 

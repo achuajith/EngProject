@@ -48,7 +48,7 @@ export async function fetchPortfolio(username: string, password: string, token?:
   return res.json()
 }
 
-// Attempt to login using username + passwordHash. Backend may return a token or user object.
+//Login using username + passwordHash.
 export async function login(username: string, password: string): Promise<any> {
   const res = await fetch(`${API_BASE}/users/login`, {
     method: 'POST',
@@ -62,7 +62,7 @@ export async function login(username: string, password: string): Promise<any> {
   return res.json()
 }
 
-// Register a new user using plaintext password (server hashes it)
+// Register a new user using plaintext password
 export async function register(username: string, email: string, fullname: string, password: string): Promise<any> {
   const res = await fetch(`${API_BASE}/users/register`, {
     method: 'POST',
@@ -167,10 +167,10 @@ export async function searchStocks(query: string, token?: string): Promise<Stock
     throw new Error(err?.error || res.statusText)
   }
 
-  // finnhub symbolSearch returns { count, result: [{ description, displaySymbol, symbol, type }, ...] }
+  // finnhub symbolSearch returns
   const j = await res.json()
   const results = Array.isArray(j?.result) ? j.result : []
-  // Map into our frontend StockSearchResult shape; live price is fetched separately when needed
+  // Map into our frontend StockSearchResult shape
   return results.map((it: any) => ({
     symbol: it.symbol,
     displaySymbol: it.displaySymbol,
@@ -212,7 +212,7 @@ export async function fetchQuote(symbol: string, token?: string): Promise<StockQ
   return res.json()
 }
 
-// Fetch company profile (proxied backend endpoint)
+// Fetch company profile
 export type CompanyProfile = {
   country?: string
   currency?: string
@@ -239,43 +239,6 @@ export async function fetchProfile(symbol: string, token?: string): Promise<Comp
   }
   const j = await res.json().catch(() => null)
   return j && Object.keys(j).length ? j : null
-}
-
-// Fetch aggregated portfolio performance from the server
-// Performance aggregation endpoint was removed from the server.
-// Keep a client-side stub so callers don't throw — it returns an empty series.
-export type PerformancePoint = { day: string; value: number }
-export async function fetchPerformance(_days = 30, _username?: string, _password?: string, _token?: string): Promise<PerformancePoint[]> {
-  // The server-side `/performance/portfolio` endpoint was intentionally removed.
-  // Returning an empty array keeps the UI stable. If you want live performance
-  // data later, I can reintroduce a cached server implementation and re-enable this.
-  console.warn('fetchPerformance: server endpoint removed; returning empty data')
-  return []
-}
-
-// Fetch daily candles for a single symbol (proxied through backend)
-// Note: candle proxy and direct quote helper removed; frontend uses symbolSearch (and backend handles trade pricing).
-
-// News proxy (server-side endpoint: GET /news?category=...)
-export type NewsItem = {
-  category: string
-  datetime: number
-  headline: string
-  id: number
-  image?: string
-  related?: string
-  source?: string
-  summary?: string
-  url?: string
-}
-
-export async function fetchNews(category = 'general') : Promise<NewsItem[]> {
-  const res = await fetch(`${API_BASE}/news?category=${encodeURIComponent(category)}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(err?.error || res.statusText)
-  }
-  return res.json()
 }
 
 // ===== Admin APIs =====

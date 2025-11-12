@@ -33,8 +33,7 @@ export function TradePage({ authToken, authUsername, authPassword, refreshPortfo
   const [loadingQuote, setLoadingQuote] = useState(false)
   const [quote, setQuote] = useState<StockQuote | null>(null)
   const [confirm, setConfirm] = useState<any>(null)
-
-  // Fetch quote when stock is selected
+  // Load quote when selected stock changes
   useEffect(() => {
     if (!selectedStock) {
       setQuote(null)
@@ -49,7 +48,6 @@ export function TradePage({ authToken, authUsername, authPassword, refreshPortfo
         const q = await fetchQuote(selectedStock.symbol, authToken)
         if (!mounted) return
         setQuote(q)
-        // Update the selected stock's price with the live quote
         setSelectedStock(prev => prev ? { ...prev, price: q.currentPrice } : null)
       } catch (e) {
         console.error('Failed to fetch quote:', e)
@@ -61,8 +59,8 @@ export function TradePage({ authToken, authUsername, authPassword, refreshPortfo
     }
     void loadQuote()
     
-    // Refresh quote every 10 seconds while stock is selected
-    const interval = setInterval(loadQuote, 10000)
+    // Refresh quote every 10 minutes while stock is selected
+    const interval = setInterval(loadQuote, 600000)
     return () => {
       mounted = false
       clearInterval(interval)
