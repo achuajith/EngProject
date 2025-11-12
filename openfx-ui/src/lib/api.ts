@@ -241,6 +241,28 @@ export async function fetchProfile(symbol: string, token?: string): Promise<Comp
   return j && Object.keys(j).length ? j : null
 }
 
+// News
+export type NewsItem = {
+  category: string
+  datetime: number
+  headline: string
+  id: number
+  image?: string
+  related?: string
+  source?: string
+  summary?: string
+  url?: string
+}
+
+export async function fetchNews(category = 'general') : Promise<NewsItem[]> {
+  const res = await fetch(`${API_BASE}/news?category=${encodeURIComponent(category)}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err?.error || res.statusText)
+  }
+  return res.json()
+}
+
 // ===== Admin APIs =====
 export type AdminUser = { email: string; fullname: string; username: string; roles: string[] }
 

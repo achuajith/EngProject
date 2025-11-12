@@ -56,9 +56,6 @@ app.use(morgan('dev'))
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY
 if (!FINNHUB_API_KEY) throw new Error('FINNHUB_API_KEY missing — set it in .env')
 
-// Use REST calls to Finnhub with the API key supplied from .env (FINNHUB_API_KEY).
-// This avoids relying on the finnhub SDK module shape and keeps server code simple.
-
 async function fetchQuote(symbol) {
   try {
     // Properly encode the symbol, preserving special characters like periods
